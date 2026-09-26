@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YouTube AI Analyzer",
   "version": "1.0.0",
-  "description": "Analyze YouTube videos with Gemini.",
+  "description": "Analyze YouTube videos with Gemma and Qwen.",
   "permissions": [
     "sidePanel",
     "activeTab"

@@ -24,6 +24,8 @@ Check `http://127.0.0.1:8000/api/health` before analyzing a video. Run `python -
 
 OpenRouter currently requires an account balance for video inputs even when the selected model has a `:free` suffix. If visual analysis returns HTTP 402, add the balance requested by OpenRouter; quick transcript analysis continues to work without video input.
 
+The free Gemma and Qwen providers use shared upstream capacity. An HTTP 429 with `temporarily rate-limited upstream` means both configured pools are busy, not that the deployment is broken. Retry later or connect your own Google/Qwen provider key in OpenRouter integrations for dedicated provider limits.
+
 ## Vercel deployment
 
 The **backend** is the Vercel project. Import this repository and set its Root Directory to `backend`. Vercel discovers `app/main.py`, installs `backend/requirements.txt`, and uses the Python version in `backend/.python-version`.
