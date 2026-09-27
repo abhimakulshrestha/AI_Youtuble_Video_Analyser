@@ -63,7 +63,7 @@ The API is stateless and suitable for Vercel Functions. The extension stores sav
 
 `matched` means the quoted words occur near the generated timestamp. `uncertain` means nearby transcript exists but the quote did not match. `unsupported` means no nearby transcript supports it. These labels validate source alignment, not the truth of the overall conclusion. Claim Check separately invokes OpenRouter web search and remains `unchecked` unless source citations are returned.
 
-Visual analysis sends a temporary direct YouTube video-stream URL plus sampled transcript context through OpenRouter. Public-video availability, YouTube stream restrictions, model availability, and OpenRouter account limits can affect that route. Protect a public deployment with appropriate Vercel rate limits or authentication because every request uses the server-side API key.
+Visual analysis sends the public YouTube URL plus sampled transcript context through OpenRouter. Public-video availability, model availability, and OpenRouter account limits can affect that route. Protect a public deployment with appropriate Vercel rate limits or authentication because every request uses the server-side API key.
 
 ## API
 

@@ -1,7 +1,4 @@
-import asyncio
 import re
-
-import yt_dlp
 
 from app.config import settings
 from app.models.features import ClaimCheckResult, DeepAnalysis, ExternalSource
@@ -13,23 +10,7 @@ class MultimodalService:
     def __init__(self, client: OpenRouterClient | None = None):
         self.client = client or OpenRouterClient()
 
-    @staticmethod
-    def _resolve_video_url(video_url: str) -> str:
-        options = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "format": "bestvideo[ext=mp4][height<=360]/bestvideo[height<=360]/bestvideo",
-        }
-        with yt_dlp.YoutubeDL(options) as downloader:
-            info = downloader.extract_info(video_url, download=False)
-        direct_url = info.get("url")
-        if not direct_url:
-            raise ValueError("YouTube did not provide a direct video stream URL.")
-        return direct_url
-
     async def analyze_video(self, video_url: str, transcript: list[dict] | None = None) -> dict:
-        direct_url = await asyncio.to_thread(self._resolve_video_url, video_url)
         transcript_context = [
             {"start": item.get("start", 0), "text": str(item.get("text", ""))[:500]}
             for item in (transcript or [])[::max(1, len(transcript or []) // 120 or 1)][:120]
@@ -46,7 +27,7 @@ class MultimodalService:
             "role": "user",
             "content": [
                 {"type": "text", "text": prompt},
-                {"type": "video_url", "video_url": {"url": direct_url}},
+                {"type": "video_url", "video_url": {"url": video_url}},
             ],
         }]
         try:

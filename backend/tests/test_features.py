@@ -141,12 +141,11 @@ def test_video_analysis_uses_openrouter_video_content(monkeypatch):
     class Client:
         async def chat(self, messages, **kwargs):
             content = messages[0]["content"]
-            assert content[1] == {"type": "video_url", "video_url": {"url": "https://media.example/video.mp4"}}
+            assert content[1] == {"type": "video_url", "video_url": {"url": f"https://www.youtube.com/watch?v={VIDEO_A}"}}
             assert kwargs["model"] == endpoints.settings.OPENROUTER_VIDEO_MODEL
             assert kwargs["response_format"] == {"type": "json_object"}
             return {"choices": [{"message": {"content": '{"visual_summary":"Demo","visual_events":[],"visual_gaps":[]}'}}]}
 
-    monkeypatch.setattr(MultimodalService, "_resolve_video_url", staticmethod(lambda _: "https://media.example/video.mp4"))
     result = asyncio.run(MultimodalService(Client()).analyze_video(f"https://www.youtube.com/watch?v={VIDEO_A}", TRANSCRIPT))
     assert result["visual_summary"] == "Demo"
 
@@ -161,7 +160,6 @@ def test_video_analysis_uses_configured_fallback(monkeypatch):
                 raise OpenRouterError(429, "Qwen provider is rate limited")
             return {"choices": [{"message": {"content": '{"visual_summary":"Fallback","visual_events":[],"visual_gaps":[]}'}}]}
 
-    monkeypatch.setattr(MultimodalService, "_resolve_video_url", staticmethod(lambda _: "https://media.example/video.mp4"))
     monkeypatch.setattr(endpoints.settings, "OPENROUTER_VIDEO_FALLBACK_MODEL", "google/gemma-4-31b-it:free")
     result = asyncio.run(MultimodalService(Client()).analyze_video(f"https://www.youtube.com/watch?v={VIDEO_A}", TRANSCRIPT))
     assert result["visual_summary"] == "Fallback"
