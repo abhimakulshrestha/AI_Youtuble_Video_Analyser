@@ -29,142 +29,53 @@ function extractVideoContext() {
   };
 }
 
-function extractJsonObject(source: string, markerIndex: number): string | null {
-  const jsonStart = source.indexOf('{', markerIndex);
-  if (jsonStart === -1) return null;
+async function fetchTranscriptFromDOM(): Promise<{ text: string; start: number; duration: number }[] | null> {
+  const videoId = new URLSearchParams(location.search).get('v');
+  const watch = document.querySelector('ytd-watch-flexy');
+  if (!videoId || watch?.getAttribute('video-id') !== videoId) return null;
 
-  let depth = 0;
-  let inString = false;
-  let escapeNext = false;
-
-  for (let i = jsonStart; i < source.length; i++) {
-    const char = source[i];
-    if (escapeNext) {
-      escapeNext = false;
-      continue;
-    }
-    if (char === '\\') {
-      escapeNext = true;
-      continue;
-    }
-    if (char === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
-
-    if (char === '{') depth++;
-    if (char === '}') depth--;
-    if (depth === 0) return source.slice(jsonStart, i + 1);
-  }
-
-  return null;
-}
-
-function extractPlayerResponseFromText(source: string): any | null {
-  const markers = [
-    'ytInitialPlayerResponse =',
-    'ytInitialPlayerResponse=',
-    'var ytInitialPlayerResponse =',
-    'window["ytInitialPlayerResponse"] =',
-    '"ytInitialPlayerResponse":',
-  ];
-
-  for (const marker of markers) {
-    let searchFrom = 0;
-    while (searchFrom < source.length) {
-      const markerIndex = source.indexOf(marker, searchFrom);
-      if (markerIndex === -1) break;
-      const jsonObject = extractJsonObject(source, markerIndex + marker.length);
-      if (jsonObject) {
-        try {
-          return JSON.parse(jsonObject);
-        } catch {
-          // Keep searching; YouTube can include similarly named fields elsewhere.
-        }
-      }
-      searchFrom = markerIndex + marker.length;
-    }
-  }
-
-  return null;
-}
-
-function extractPlayerResponseFromDOM(): any | null {
-  const windowPlayerResponse = (window as any).ytInitialPlayerResponse;
-  if (windowPlayerResponse) return windowPlayerResponse;
-
-  const scripts = Array.from(document.scripts);
-  for (let i = scripts.length - 1; i >= 0; i--) {
-    const text = scripts[i].textContent;
-    if (!text || !text.includes('ytInitialPlayerResponse')) continue;
-
-    const playerResponse = extractPlayerResponseFromText(text);
-    if (playerResponse) return playerResponse;
-  }
-
-  return null;
-}
-
-function parseTranscriptJson(payload: string): any[] | null {
-  try {
-    const json = JSON.parse(payload.replace(/^\)\]\}'\s*/, ''));
-    const transcriptData = [];
-
-    for (const event of (json.events || [])) {
-      if (!event.segs) continue;
-      const text = event.segs.map((segment: any) => segment.utf8 || '').join('').trim();
-      if (!text) continue;
-
-      transcriptData.push({
-        text,
-        start: (event.tStartMs || 0) / 1000.0,
-        duration: (event.dDurationMs || 0) / 1000.0,
+  const selector = 'ytd-engagement-panel-section-list-renderer[target-id="PAmodern_transcript_view"]';
+  let panel = document.querySelector(selector);
+  const wasOpen = panel?.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED';
+  if (!wasOpen) {
+    const button = document.querySelector<HTMLButtonElement>('ytd-video-description-transcript-section-renderer button[aria-label="Show transcript"]');
+    if (!button) return null;
+    button.click();
+    const ready = () => {
+      const current = document.querySelector(selector);
+      return current?.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' && !!current.querySelector('transcript-segment-view-model');
+    };
+    if (!ready()) {
+      await new Promise<void>(resolve => {
+        const timer = window.setTimeout(() => { observer.disconnect(); resolve(); }, 8000);
+        const observer = new MutationObserver(() => {
+          if (!ready()) return;
+          window.clearTimeout(timer);
+          observer.disconnect();
+          resolve();
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['visibility'] });
       });
     }
-
-    return transcriptData.length > 0 ? transcriptData : null;
-  } catch {
-    return null;
+    panel = document.querySelector(selector);
   }
-}
 
-function parseTranscriptXml(payload: string): any[] | null {
-  const doc = new DOMParser().parseFromString(payload, 'text/xml');
-  if (doc.querySelector('parsererror')) return null;
-
-  const transcriptData = Array.from(doc.querySelectorAll('text'))
-    .map((node) => ({
-      text: (node.textContent || '').trim(),
-      start: Number(node.getAttribute('start') || 0),
-      duration: Number(node.getAttribute('dur') || 0),
-    }))
-    .filter((segment) => segment.text);
-
-  return transcriptData.length > 0 ? transcriptData : null;
-}
-
-async function fetchTranscriptFromDOM(): Promise<any[] | null> {
   try {
-    const data = extractPlayerResponseFromDOM();
-    const currentVideoId = new URLSearchParams(window.location.search).get('v');
-    if (data?.videoDetails?.videoId && data.videoDetails.videoId !== currentVideoId) return null;
-    const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-    if (!tracks || tracks.length === 0) return null;
-
-    const track = tracks.find((item: any) => item.languageCode === 'en')
-      || tracks.find((item: any) => item.languageCode?.startsWith('en'))
-      || tracks[0];
-    if (!track?.baseUrl) return null;
-
-    const separator = track.baseUrl.includes('?') ? '&' : '?';
-    const res = await fetch(`${track.baseUrl}${separator}fmt=json3`, { credentials: 'include' });
-    if (!res.ok) return null;
-
-    const payload = await res.text();
-    return parseTranscriptJson(payload) || parseTranscriptXml(payload);
-  } catch {
-    return null;
+    if (new URLSearchParams(location.search).get('v') !== videoId || panel?.getAttribute('visibility') !== 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED') return null;
+    const segments = Array.from(panel.querySelectorAll('transcript-segment-view-model')).flatMap(node => {
+      const time = node.querySelector('.ytwTranscriptSegmentViewModelTimestamp')?.textContent?.trim();
+      const text = node.querySelector('span[role="text"]')?.textContent?.trim();
+      if (!time || !text) return [];
+      const parts = time.split(':').map(Number);
+      if (parts.some(part => !Number.isFinite(part))) return [];
+      return [{ text, start: parts.reduce((seconds, part) => seconds * 60 + part, 0), duration: 0 }];
+    });
+    for (let index = 0; index < segments.length; index++) {
+      segments[index].duration = index + 1 < segments.length ? Math.max(0, segments[index + 1].start - segments[index].start) : 3;
+    }
+    return segments.length ? segments : null;
+  } finally {
+    if (!wasOpen) panel?.querySelector<HTMLButtonElement>('button[aria-label="Close"]')?.click();
   }
 }
 

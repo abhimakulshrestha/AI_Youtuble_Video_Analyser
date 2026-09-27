@@ -40,6 +40,11 @@ class VideoAnalysis(BaseModel):
     action_items: List[Dict[str, Any]] = Field(default_factory=list)
     conclusions: List[str] = Field(default_factory=list)
 
+    @field_validator("key_points", "chapters", "topics", "entities", "terminology", "statistics", "action_items", mode="before")
+    @classmethod
+    def discard_empty_records(cls, value: Any) -> Any:
+        return [item for item in value if isinstance(item, (dict, BaseModel))] if isinstance(value, list) else value
+
     @field_validator("conclusions", mode="before")
     @classmethod
     def normalize_conclusions(cls, value: Any) -> Any:

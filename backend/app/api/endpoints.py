@@ -71,20 +71,21 @@ async def analyze_video(request: AnalyzeRequest):
     require_groq()
 
     transcript = get_transcript_data(video_id, request.language, request.transcript_data)
-    chunks = TranscriptService.chunk_transcript(transcript)
     try:
-        analysis = await LLMService().generate_full_analysis(chunks)
+        analysis, sampled = await LLMService().generate_full_analysis(transcript)
         result = analysis.model_dump()
         result["transcript_data"] = transcript
         result["evidence_checks"] = [check.model_dump() for check in check_analysis(analysis, transcript)]
+        if sampled:
+            result["feature_warnings"] = ["Long video: analysis uses evenly spaced transcript excerpts, so some details may be missed."]
         if request.mode == "deep":
             if request.frames:
                 try:
                     result["deep_analysis"] = await MultimodalService().analyze_frames(request.frames, transcript)
                 except (GroqError, ValueError) as exc:
-                    result["feature_warnings"] = [f"Visual analysis unavailable: {exc}"]
+                    result.setdefault("feature_warnings", []).append(f"Visual analysis unavailable: {exc}")
             else:
-                result["feature_warnings"] = ["Visual analysis needs frames captured from the YouTube player."]
+                result.setdefault("feature_warnings", []).append("Visual analysis needs frames captured from the YouTube player.")
         return result
     except Exception as exc:
         raise upstream_failure("Analysis failed", exc) from exc

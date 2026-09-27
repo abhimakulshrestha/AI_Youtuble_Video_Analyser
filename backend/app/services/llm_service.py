@@ -53,15 +53,27 @@ class LLMService:
                     raise
         raise last_error or RuntimeError("No text model is configured.")
 
-    async def generate_full_analysis(self, chunks: list[dict[str, Any]]) -> VideoAnalysis:
-        if not chunks:
-            raise ValueError("No transcript chunks provided.")
+    async def generate_full_analysis(self, transcript: list[dict[str, Any]]) -> tuple[VideoAnalysis, bool]:
+        if not transcript:
+            raise ValueError("No transcript segments provided.")
         context = [
-            {"start": item["start_time"], "end": item["end_time"], "text": item["text"]}
-            for item in chunks
+            {"start": item["start"], "end": item["start"] + item.get("duration", 0), "text": item["text"]}
+            for item in transcript if item.get("text", "").strip()
         ]
+        if not context:
+            raise ValueError("No usable transcript segments provided.")
+        sampled = len(json.dumps(context, ensure_ascii=False)) > 12000
+        if sampled:
+            original = context
+            count = min(len(original), 200)
+            while True:
+                indices = (round(index * (len(original) - 1) / max(1, count - 1)) for index in range(count))
+                context = [{**original[index], "text": original[index]["text"][:200]} for index in indices]
+                if len(json.dumps(context, ensure_ascii=False)) <= 12000 or count == 1:
+                    break
+                count = max(1, int(count * 0.8))
         data = await self.generate_json(
-            """Analyze this video transcript comprehensively. Use this exact schema:
+            """Analyze only the supplied transcript excerpts; do not imply unsampled moments were reviewed. Use this exact schema:
             {"executive_summary":string,"detailed_summary":string,"content_type":string|null,
             "key_points":[{"title":string,"explanation":string,"evidence":[{"start":number,"end":number|null,"text":string|null}]}],
             "chapters":[{"title":string,"start":number,"end":number,"summary":string,"key_points":[string]}],
@@ -71,7 +83,7 @@ class LLMService:
             Evidence text must quote the supplied transcript exactly. Use only supplied timestamps.""",
             {"transcript": context},
         )
-        return VideoAnalysis.model_validate(data)
+        return VideoAnalysis.model_validate(data), sampled
 
     async def answer_question(self, question: str, retrieved_docs: list[dict[str, Any]]) -> dict[str, Any]:
         context = [

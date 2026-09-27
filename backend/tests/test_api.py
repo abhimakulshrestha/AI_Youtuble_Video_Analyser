@@ -43,13 +43,13 @@ def test_groq_client_uses_qwen_json_mode(monkeypatch):
 
 
 class FakeLLM:
-    async def generate_full_analysis(self, chunks):
-        assert chunks[0]["text"]
+    async def generate_full_analysis(self, transcript):
+        assert transcript[0]["text"]
         return VideoAnalysis(
             executive_summary="Solar power overview",
             detailed_summary="Solar panels make electricity.",
             key_points=[], chapters=[], topics=[],
-        )
+        ), False
 
     async def answer_question(self, question, chunks):
         assert "Solar panels" in chunks[0]["text"]
@@ -81,6 +81,17 @@ def test_transcript_api_objects_are_normalized(monkeypatch):
     assert result == TRANSCRIPT
     assert transcript_service.TranscriptService.get_transcript_hash(result)
     assert transcript_service.TranscriptService.chunk_transcript(result)[0]["start_time"] == 0
+
+
+def test_transcript_failure_does_not_expose_bot_diagnostics(monkeypatch):
+    class BlockedAPI:
+        def list(self, video_id):
+            raise RuntimeError("Sign in to confirm you're not a bot; use cookies from browser")
+
+    monkeypatch.setattr(transcript_service, "YouTubeTranscriptApi", BlockedAPI)
+    with pytest.raises(RuntimeError, match="YouTube did not provide captions") as exc:
+        transcript_service.TranscriptService.fetch_transcript(VIDEO_ID)
+    assert "cookies" not in str(exc.value)
 
 
 def test_analyze_ask_and_cors(monkeypatch):
@@ -135,10 +146,11 @@ def test_groq_completion_is_parsed():
             return {"choices": [{"message": {"content": f"```json\n{payload}\n```"}}]}
 
     service = llm_service.LLMService(Client())
-    analysis = asyncio.run(service.generate_full_analysis([
-        {"start_time": 0.0, "end_time": 5.0, "text": "Transcript text"}
+    analysis, sampled = asyncio.run(service.generate_full_analysis([
+        {"start": 0.0, "duration": 5.0, "text": "Transcript text"}
     ]))
     assert analysis.executive_summary == "Summary"
+    assert sampled is False
 
 
 def test_single_conclusion_from_groq_is_normalized():
@@ -147,6 +159,35 @@ def test_single_conclusion_from_groq_is_normalized():
         "key_points": [], "chapters": [], "topics": [], "conclusions": "One conclusion",
     })
     assert analysis.conclusions == ["One conclusion"]
+
+
+def test_blank_model_list_items_are_discarded():
+    analysis = VideoAnalysis.model_validate({
+        "executive_summary": "Summary", "detailed_summary": "Details",
+        "key_points": [], "chapters": [], "topics": ["", {"name": "Solar", "description": "Power", "timestamp_ranges": []}],
+    })
+    assert len(analysis.topics) == 1
+
+
+def test_long_transcript_is_sampled_across_video():
+    captured = {}
+
+    class Client:
+        async def chat(self, messages, **kwargs):
+            captured.update(json.loads(messages[1]["content"]))
+            return {"choices": [{"message": {"content": json.dumps({
+                "executive_summary": "Sampled", "detailed_summary": "Sampled excerpts",
+                "key_points": [], "chapters": [], "topics": [],
+            })}}]}
+
+    transcript = [{"text": "Detailed line " * 8, "start": i * 6, "duration": 6} for i in range(600)]
+    analysis, sampled = asyncio.run(llm_service.LLMService(Client()).generate_full_analysis(transcript))
+    excerpts = captured["transcript"]
+    assert analysis.executive_summary == "Sampled"
+    assert sampled is True
+    assert len(json.dumps(excerpts)) <= 12000
+    assert excerpts[0]["start"] == 0
+    assert excerpts[-1]["start"] == 3594
 
 
 def test_text_analysis_falls_back_from_gpt_oss_to_qwen():
@@ -164,8 +205,8 @@ def test_text_analysis_falls_back_from_gpt_oss_to_qwen():
             })}}]}
 
     service = llm_service.LLMService(Client())
-    analysis = asyncio.run(service.generate_full_analysis([
-        {"start_time": 0.0, "end_time": 5.0, "text": "Transcript text"}
+    analysis, _ = asyncio.run(service.generate_full_analysis([
+        {"start": 0.0, "duration": 5.0, "text": "Transcript text"}
     ]))
     assert analysis.executive_summary == "Fallback summary"
     assert calls == [llm_service.settings.GROQ_MODEL, llm_service.settings.GROQ_FALLBACK_MODEL]

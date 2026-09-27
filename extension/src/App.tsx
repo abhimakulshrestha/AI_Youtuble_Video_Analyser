@@ -139,6 +139,14 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
+      let transcript_data = videoContext.transcript_data;
+      if (!transcript_data && videoId) {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs[0]?.id) {
+          const fresh = await chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_VIDEO_CONTEXT' }).catch(() => null);
+          if (fresh?.videoId === videoId) transcript_data = fresh.transcript_data;
+        }
+      }
       const captureVisualFrames = async (): Promise<VideoFrame[]> => {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         const tabId = tabs[0]?.id;
@@ -196,7 +204,6 @@ export default function App() {
         setActiveTab('timeline');
         return;
       }
-      const transcript_data = videoContext.transcript_data;
       let frames: VideoFrame[] | undefined;
       let captureError: string | undefined;
       if (mode === 'deep') {

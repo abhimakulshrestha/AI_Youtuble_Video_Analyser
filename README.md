@@ -7,6 +7,7 @@ A Chrome side panel for transcript analysis, goal-based watch plans, a live comp
 - Groq `openai/gpt-oss-20b` handles transcript analysis, Q&A, plans, study sets, claim extraction, and comparisons. `qwen/qwen3.8-27b` is its text fallback.
 - Groq Qwen analyzes timestamped screenshots captured from the visible YouTube player. It does not receive or decode a YouTube URL as video. Deep analysis samples three frames; it cannot see every moment. The extension temporarily seeks through the video and restores playback afterward.
 - Groq GPT-OSS browser search checks individual claims against outside sources. Unchecked claims are labeled as such. Transcript evidence labels indicate quote/timestamp alignment, not independent factual truth.
+- For long videos, the backend spreads transcript excerpts across the full timeline to stay within Groq's input-token limit and shows a coverage warning. Short videos use the full transcript.
 
 ## Local setup
 

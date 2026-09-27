@@ -1,14 +1,10 @@
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import hashlib
 
 class TranscriptService:
     @staticmethod
     def fetch_transcript(video_id: str, preferred_language: str = "en") -> List[Dict[str, Any]]:
-        """
-        Fetches the transcript for the given video_id.
-        Tries youtube_transcript_api first, then falls back to yt-dlp if IP blocked.
-        """
         try:
             transcript_list = YouTubeTranscriptApi().list(video_id)
             
@@ -34,63 +30,10 @@ class TranscriptService:
                     pass
                     
             return transcript.fetch().to_raw_data()
-            
-        except Exception as api_err:
-            print(f"youtube-transcript-api failed ({api_err}). Falling back to yt-dlp...")
-            # Fallback to yt-dlp when IP is blocked
-            try:
-                import yt_dlp
-                import httpx
-                
-                ydl_opts = {'quiet': True, 'skip_download': True, 'writesubtitles': True, 'writeautomaticsub': True}
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-                    subs = info.get('subtitles') or {}
-                    auto_subs = info.get('automatic_captions') or {}
-                    
-                    target_sub = None
-                    for lang in [preferred_language, 'en']:
-                        if lang in subs:
-                            target_sub = subs[lang]
-                            break
-                        if lang in auto_subs:
-                            target_sub = auto_subs[lang]
-                            break
-                    
-                    if not target_sub:
-                        if subs: target_sub = list(subs.values())[0]
-                        elif auto_subs: target_sub = list(auto_subs.values())[0]
-                        else: raise Exception("No subtitles found via fallback.")
-                        
-                    json3_url = next((s['url'] for s in target_sub if s['ext'] == 'json3'), None)
-                    if not json3_url:
-                        raise Exception("No JSON3 subtitle format found via fallback.")
-                        
-                    headers = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    }
-                    res = httpx.get(json3_url, headers=headers, timeout=30.0)
-                    if res.status_code != 200:
-                        raise Exception(f"Failed to fetch subtitle URL, got status {res.status_code}")
-                    data = res.json()
-                    
-                    transcript_data = []
-                    for event in data.get('events', []):
-                        if 'segs' not in event: continue
-                        text = "".join(seg.get('utf8', '') for seg in event['segs']).strip()
-                        if not text: continue
-                        
-                        start = event.get('tStartMs', 0) / 1000.0
-                        duration = event.get('dDurationMs', 0) / 1000.0
-                        transcript_data.append({
-                            "text": text,
-                            "start": start,
-                            "duration": duration
-                        })
-                    return transcript_data
-                    
-            except Exception as fallback_err:
-                raise Exception(f"Failed to fetch transcript (both API and fallback failed). Fallback error: {str(fallback_err)}")
+        except (TranscriptsDisabled, NoTranscriptFound) as exc:
+            raise ValueError("This video has no accessible captions.") from exc
+        except Exception as exc:
+            raise RuntimeError("YouTube did not provide captions to the server. Reload the extension and YouTube tab, then retry.") from exc
 
     @staticmethod
     def get_transcript_hash(transcript_data: List[Dict[str, Any]]) -> str:
