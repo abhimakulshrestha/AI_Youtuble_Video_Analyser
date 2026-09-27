@@ -77,6 +77,15 @@ class OpenRouterClient:
             raise OpenRouterError(response.status_code, f"OpenRouter request failed: {message}")
 
         data = response.json()
+        if data.get("error"):
+            error = data["error"]
+            message = error.get("message") or "Provider returned error"
+            try:
+                message = json.loads(message).get("message", message)
+            except (ValueError, AttributeError):
+                pass
+            code = error.get("code")
+            raise OpenRouterError(code if isinstance(code, int) and 400 <= code <= 599 else 502, f"OpenRouter request failed: {message}")
         if not data.get("choices"):
             raise OpenRouterError(502, "OpenRouter returned no completion choices.")
         return data

@@ -1,11 +1,14 @@
 from fastapi.testclient import TestClient
 import asyncio
 import json
+import httpx
+import pytest
 
 from app.api import endpoints
 from app.main import app
 from app.models.schemas import VideoAnalysis
 from app.services import llm_service, transcript_service
+from app.services import openrouter_client
 
 
 VIDEO_ID = "dQw4w9WgXcQ"
@@ -13,6 +16,16 @@ TRANSCRIPT = [
     {"text": "A useful explanation of solar power.", "start": 0.0, "duration": 5.0},
     {"text": "Solar panels turn sunlight into electricity.", "start": 5.0, "duration": 5.0},
 ]
+
+
+def test_openrouter_embedded_error_is_not_reported_as_empty_completion(monkeypatch):
+    monkeypatch.setattr(openrouter_client.settings, "OPENROUTER_API_KEY", "test-key")
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"error": {"code": 400, "message": '{"message":"Could not decode video"}'}}))
+    monkeypatch.setattr(openrouter_client.httpx, "AsyncClient", lambda **_: real_client(transport=transport))
+    with pytest.raises(openrouter_client.OpenRouterError, match="Could not decode video") as exc:
+        asyncio.run(openrouter_client.OpenRouterClient().chat([{"role": "user", "content": "test"}]))
+    assert exc.value.status_code == 400
 
 
 class FakeLLM:
