@@ -17,7 +17,7 @@ Requires Python 3.12, Node.js, and an OpenRouter API key.
 1. Install dependencies from the repository root: `python -m pip install -r requirements.txt`.
 2. Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`.
 3. Start the API: `cd backend`, then `uvicorn app.main:app --reload --port 8000`.
-4. In another terminal run `cd extension`, `npm ci`, then `npm run build`.
+4. In another terminal run `cd extension`, `npm ci`, then `npm run build -- --mode development` for the local API. Plain `npm run build` targets the deployed API.
 5. In `chrome://extensions`, enable Developer mode and load `extension/dist` as an unpacked extension. Refresh open YouTube tabs after reloading it.
 
 Check `http://127.0.0.1:8000/api/health` before analyzing a video. Run `python -m pytest -q` from the repository root for backend tests and `npm run lint` in `extension` for frontend linting.
@@ -28,7 +28,7 @@ The free Gemma and Qwen providers use shared upstream capacity. An HTTP 429 with
 
 ## Vercel deployment
 
-The **backend** is the Vercel project. Import this repository and set its Root Directory to `backend`. Vercel discovers `app/main.py`, installs `backend/requirements.txt`, and uses the Python version in `backend/.python-version`.
+The **backend** is the Vercel project. Import this repository with the repository root as its Root Directory. Vercel discovers root `main.py` and installs root `requirements.txt`; the app code lives in `backend/app`.
 
 Set these Vercel environment variables:
 
@@ -45,7 +45,7 @@ OPENROUTER_REASONING_ENABLED=true
 
 `CORS_ALLOWED_ORIGIN_REGEX` defaults to Chrome extension origins. Verify `https://YOUR-PROJECT.vercel.app/api/health` after deployment. The local `.env` file is never uploaded automatically.
 
-For a CLI deployment, run `vercel link` and `vercel deploy --prod` inside `backend` after adding the environment variables to the linked Vercel project.
+For a CLI deployment, run `vercel link` and `vercel deploy --prod` from the repository root after adding the environment variables to the linked Vercel project.
 
 Build the extension against the deployed API:
 

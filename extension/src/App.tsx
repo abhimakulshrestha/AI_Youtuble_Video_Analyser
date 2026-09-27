@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, type VideoAnalysis, type TranscriptSegment } from './shared/api';
 import { library, type SavedVideo } from './shared/library';
 import { FeatureViews } from './FeatureViews';
@@ -34,13 +34,16 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const activeVideoId = useRef<string | null>(null);
+  const viewAnalysis = analysis || savedVideos[0]?.analysis;
+  const visibleTab = !analysis && !['library', 'compare'].includes(activeTab) ? 'library' : activeTab;
 
   const refreshLibrary = useCallback(() => { library.list().then(setSavedVideos).catch(err => setError(String(err))); }, []);
 
   const restoreSavedVideo = (videoId: string | null) => {
     if (!videoId) return;
     library.get(videoId).then(saved => {
-      if (!saved) return;
+      if (!saved || activeVideoId.current !== videoId) return;
       setAnalysis(saved.analysis);
       setTranscriptData(saved.transcript);
     }).catch(err => setError(String(err)));
@@ -52,6 +55,12 @@ export default function App() {
       if (activeTab && activeTab.id && activeTab.url?.includes('youtube.com/watch')) {
         chrome.tabs.sendMessage(activeTab.id, { type: 'GET_VIDEO_CONTEXT' }, (response: any) => {
           if (response) {
+            if (activeVideoId.current !== response.videoId) {
+              setAnalysis(null);
+              setTranscriptData(undefined);
+              setLoading(false);
+            }
+            activeVideoId.current = response.videoId;
             setVideoContext(response);
             setPlayerTime(response.currentTime || 0);
             setError(null);
@@ -59,6 +68,12 @@ export default function App() {
           } else {
              // Not loaded yet or injected yet
              const videoId = activeTab.url ? new URLSearchParams(new URL(activeTab.url).search).get('v') : null;
+             if (activeVideoId.current !== videoId) {
+               setAnalysis(null);
+               setTranscriptData(undefined);
+               setLoading(false);
+             }
+             activeVideoId.current = videoId;
              setVideoContext({
                  url: activeTab.url || '',
                  title: activeTab.title || 'YouTube Video',
@@ -71,7 +86,11 @@ export default function App() {
           }
         });
       } else {
+        activeVideoId.current = null;
         setVideoContext(null);
+        setAnalysis(null);
+        setTranscriptData(undefined);
+        setLoading(false);
         setError("Please open a YouTube video to use the Analyzer.");
       }
     });
@@ -83,14 +102,20 @@ export default function App() {
 
     const listener = (message: any) => {
       if (message.type === 'VIDEO_CHANGED') {
+        activeVideoId.current = null;
         setAnalysis(null); // Reset analysis on new video
         setTranscriptData(undefined);
+        setLoading(false);
         fetchContext();
       }
     };
     
     chrome.runtime.onMessage.addListener(listener);
-    return () => chrome.runtime.onMessage.removeListener(listener);
+    chrome.tabs.onActivated.addListener(fetchContext);
+    return () => {
+      chrome.runtime.onMessage.removeListener(listener);
+      chrome.tabs.onActivated.removeListener(fetchContext);
+    };
   }, [refreshLibrary]);
 
   useEffect(() => {
@@ -110,11 +135,13 @@ export default function App() {
 
   const handleAnalyze = async (mode: 'quick' | 'deep') => {
     if (!videoContext?.url) return;
+    const videoId = videoContext.videoId;
     setLoading(true);
     setError(null);
     try {
       if (mode === 'deep' && analysis && videoContext.videoId) {
         const deep_analysis = await api.visual(videoContext.videoId, transcriptData || analysis.transcript_data);
+        if (activeVideoId.current !== videoId) return;
         setAnalysis({ ...analysis, deep_analysis });
         setActiveTab('timeline');
         return;
@@ -124,13 +151,14 @@ export default function App() {
           transcript_data = await api.fetchTranscriptNatively(videoContext.videoId) || undefined;
       }
       const result = await api.analyzeVideo(videoContext.url, transcript_data, mode);
+      if (activeVideoId.current !== videoId) return;
       setTranscriptData(result.transcript_data || transcript_data);
       setAnalysis(result);
       setActiveTab('summary');
     } catch (err: any) {
-      setError(err.message || 'Failed to analyze video');
+      if (activeVideoId.current === videoId) setError(err.message || 'Failed to analyze video');
     } finally {
-      setLoading(false);
+      if (activeVideoId.current === videoId) setLoading(false);
     }
   };
 
@@ -193,14 +221,14 @@ export default function App() {
         </div>
       )}
 
-      {analysis && !loading && (
+      {viewAnalysis && !loading && (
         <>
           <div className="tabs">
-            {['overview', 'summary', 'chapters', 'topics', 'timeline', 'plan', 'live', 'claims', 'study', 'library', 'compare', 'ask ai'].map(tab => (
+            {(analysis ? ['overview', 'summary', 'chapters', 'topics', 'timeline', 'plan', 'live', 'claims', 'study', 'library', 'compare', 'ask ai'] : ['library', 'compare']).map(tab => (
               <button
                 type="button"
                 key={tab} 
-                className={`tab ${activeTab === tab ? 'active' : ''}`}
+                className={`tab ${visibleTab === tab ? 'active' : ''}`}
                 onClick={() => setActiveTab(tab)}
               >
                 {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -209,7 +237,7 @@ export default function App() {
           </div>
 
           <div className="content-area">
-            {activeTab === 'overview' && (
+            {analysis && visibleTab === 'overview' && (
               <div>
                 {analysis.feature_warnings?.map((warning, index) => <p className="feature-error" key={index}>{warning}</p>)}
                 <h3>Executive Summary</h3>
@@ -223,7 +251,7 @@ export default function App() {
               </div>
             )}
 
-            {activeTab === 'summary' && (
+            {analysis && visibleTab === 'summary' && (
               <div>
                 <h3>Detailed Summary</h3>
                 <ReactMarkdown>{analysis.detailed_summary}</ReactMarkdown>
@@ -253,7 +281,7 @@ export default function App() {
               </div>
             )}
 
-            {activeTab === 'chapters' && (
+            {analysis && visibleTab === 'chapters' && (
               <div>
                 {analysis.chapters.map((ch, i) => (
                   <div key={i} className="card">
@@ -267,7 +295,7 @@ export default function App() {
               </div>
             )}
             
-            {activeTab === 'topics' && (
+            {analysis && visibleTab === 'topics' && (
               <div>
                 {analysis.topics.map((t, i) => (
                   <div key={i} className="card">
@@ -285,7 +313,7 @@ export default function App() {
               </div>
             )}
 
-            {activeTab === 'ask ai' && (
+            {analysis && visibleTab === 'ask ai' && (
               videoContext?.videoId ? (
                 <ChatInterface videoId={videoContext.videoId} transcriptData={transcriptData} onSeek={handleSeek} focusTime={focusTime} />
               ) : (
@@ -293,7 +321,7 @@ export default function App() {
               )
             )}
             {videoContext?.videoId && (
-              <FeatureViews tab={activeTab} videoId={videoContext.videoId} title={videoContext.title} analysis={analysis} transcript={transcriptData || []} playerTime={playerTime} playerState={playerState} savedVideos={savedVideos} refreshLibrary={refreshLibrary} onSeek={handleSeek} onPause={pauseVideo} onAskMoment={() => { setFocusTime(playerTime); setActiveTab('ask ai'); }} />
+              <FeatureViews key={videoContext.videoId} tab={visibleTab} videoId={videoContext.videoId} title={videoContext.title} analysis={viewAnalysis} transcript={transcriptData || []} playerTime={playerTime} playerState={playerState} savedVideos={savedVideos} refreshLibrary={refreshLibrary} onSeek={handleSeek} onPause={pauseVideo} onAskMoment={() => { setFocusTime(playerTime); setActiveTab('ask ai'); }} />
             )}
           </div>
         </>
