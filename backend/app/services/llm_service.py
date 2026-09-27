@@ -3,6 +3,7 @@ from typing import Any
 
 from app.config import settings
 from app.models.schemas import VideoAnalysis
+from app.services.groq_client import GroqClient, GroqError
 from app.services.openrouter_client import OpenRouterClient, OpenRouterError, first_message, message_text
 
 
@@ -18,8 +19,9 @@ def parse_json_object(content: str) -> dict[str, Any]:
 
 
 class LLMService:
-    def __init__(self, client: OpenRouterClient | None = None):
+    def __init__(self, client: OpenRouterClient | None = None, groq_client: GroqClient | None = None):
         self.client = client or OpenRouterClient()
+        self.groq_client = groq_client or (GroqClient() if settings.GROQ_API_KEY and client is None else None)
 
     async def generate_json(self, instruction: str, payload: Any) -> dict[str, Any]:
         messages = [
@@ -29,27 +31,31 @@ class LLMService:
             },
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ]
-        models = list(dict.fromkeys(filter(None, [settings.OPENROUTER_MODEL, settings.OPENROUTER_FALLBACK_MODEL])))
+        attempts = [(self.client, settings.OPENROUTER_MODEL)]
+        if self.groq_client:
+            attempts.append((self.groq_client, settings.GROQ_MODEL))
+        if settings.OPENROUTER_FALLBACK_MODEL and settings.OPENROUTER_FALLBACK_MODEL not in {settings.OPENROUTER_MODEL, settings.GROQ_MODEL}:
+            attempts.append((self.client, settings.OPENROUTER_FALLBACK_MODEL))
         last_error: Exception | None = None
-        for index, model in enumerate(models):
+        for index, (client, model) in enumerate(attempts):
             try:
-                response = await self.client.chat(
+                response = await client.chat(
                     messages,
                     model=model,
                     max_tokens=6000,
                     response_format={"type": "json_object"},
                 )
                 return parse_json_object(message_text(first_message(response)))
-            except OpenRouterError as exc:
+            except (OpenRouterError, GroqError) as exc:
                 last_error = exc
                 retryable = exc.status_code in {404, 408, 409, 429} or exc.status_code >= 500
-                if not retryable or index == len(models) - 1:
+                if not retryable or index == len(attempts) - 1:
                     raise
             except ValueError as exc:
                 last_error = exc
-                if index == len(models) - 1:
+                if index == len(attempts) - 1:
                     raise
-        raise last_error or RuntimeError("No OpenRouter text model is configured.")
+        raise last_error or RuntimeError("No text model is configured.")
 
     async def generate_full_analysis(self, chunks: list[dict[str, Any]]) -> VideoAnalysis:
         if not chunks:

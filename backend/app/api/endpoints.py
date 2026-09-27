@@ -12,6 +12,7 @@ from app.models.features import (
 from app.services.evidence import bound_start, check_analysis, check_excerpt, video_end
 from app.services.llm_service import LLMService
 from app.services.multimodal_service import MultimodalService
+from app.services.groq_client import GroqError
 from app.services.openrouter_client import OpenRouterError
 from app.services.transcript_service import TranscriptService
 from app.utils.youtube import extract_video_id, is_valid_youtube_id
@@ -20,7 +21,7 @@ router = APIRouter()
 
 
 def upstream_failure(action: str, exc: Exception) -> HTTPException:
-    if isinstance(exc, OpenRouterError):
+    if isinstance(exc, (OpenRouterError, GroqError)):
         status = exc.status_code if exc.status_code in {400, 401, 402, 403, 408, 409, 429} else 502
         return HTTPException(status_code=status, detail=f"{action}: {exc}")
     if isinstance(exc, NotImplementedError):
@@ -59,6 +60,7 @@ def health_check():
         multimodal_provider=bool(settings.OPENROUTER_API_KEY and settings.OPENROUTER_VIDEO_MODEL),
         llm_model=settings.OPENROUTER_MODEL,
         llm_fallback_model=settings.OPENROUTER_FALLBACK_MODEL or None,
+        groq_model=settings.GROQ_MODEL if settings.GROQ_API_KEY else None,
         video_model=settings.OPENROUTER_VIDEO_MODEL,
         video_fallback_model=settings.OPENROUTER_VIDEO_FALLBACK_MODEL or None,
     )

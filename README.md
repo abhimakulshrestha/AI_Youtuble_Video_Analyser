@@ -7,6 +7,7 @@ A Chrome side panel for evidence-aware YouTube analysis, guided watch plans, a l
 - `google/gemma-4-31b-it:free` handles transcript analysis, questions about the current moment, watch plans, study sets, claim extraction, library comparisons, and web-grounded claim explanations.
 - `qwen/qwen3.8-27b:free` handles slides, charts, diagrams, demonstrations, visual events, and spoken-versus-shown gaps.
 - Qwen also acts as the structured-text fallback when Gemma's provider is temporarily unavailable.
+- When `GROQ_API_KEY` is set, Groq's `qwen/qwen3.8-27b` is tried before the OpenRouter Qwen text fallback. The isolated `backend/app/services/groq_client.py` uses Groq's chat API and JSON mode; it does not receive raw video URLs.
 - Visual analysis currently uses Qwen. Although Gemma advertises video input, neither model can reliably decode a YouTube watch-page URL as a video file through OpenRouter. A visual failure leaves the transcript analysis intact and displays a warning.
 - Timestamp evidence is checked deterministically against the transcript after generation. A model cannot mark its own unsupported quote as verified.
 
@@ -15,7 +16,7 @@ A Chrome side panel for evidence-aware YouTube analysis, guided watch plans, a l
 Requires Python 3.12, Node.js, and an OpenRouter API key.
 
 1. Install dependencies from the repository root: `python -m pip install -r requirements.txt`.
-2. Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`.
+2. Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`. Optionally set `GROQ_API_KEY` to enable the Qwen text fallback.
 3. Start the API: `cd backend`, then `uvicorn app.main:app --reload --port 8000`.
 4. In another terminal run `cd extension`, `npm ci`, then `npm run build -- --mode development` for the local API. Plain `npm run build` targets the deployed API.
 5. In `chrome://extensions`, enable Developer mode and load `extension/dist` as an unpacked extension. Refresh open YouTube tabs after reloading it.
@@ -41,7 +42,11 @@ OPENROUTER_VIDEO_FALLBACK_MODEL=
 OPENROUTER_SITE_URL=https://YOUR-PROJECT.vercel.app
 OPENROUTER_APP_NAME=YouTube AI Analyzer
 OPENROUTER_REASONING_ENABLED=true
+GROQ_API_KEY=...
+GROQ_MODEL=qwen/qwen3.8-27b
 ```
+
+Add `GROQ_API_KEY` to Vercel's production environment and redeploy to enable the Groq fallback there. A local `.env` value does not reach Vercel. `/api/health` reports `groq_model` only when the deployed key is configured.
 
 `CORS_ALLOWED_ORIGIN_REGEX` defaults to Chrome extension origins. Verify `https://YOUR-PROJECT.vercel.app/api/health` after deployment. The local `.env` file is never uploaded automatically.
 

@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     OPENROUTER_SITE_URL: str = ""
     OPENROUTER_APP_NAME: str = "YouTube AI Analyzer"
     OPENROUTER_REASONING_ENABLED: bool = True
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "qwen/qwen3.8-27b"
     
     CORS_ALLOWED_ORIGINS: str = ""
     CORS_ALLOWED_ORIGIN_REGEX: str = r"chrome-extension://.*"

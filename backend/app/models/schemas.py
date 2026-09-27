@@ -68,5 +68,6 @@ class HealthResponse(BaseModel):
     llm_provider: str = "openrouter"
     llm_model: str
     llm_fallback_model: str | None = None
+    groq_model: str | None = None
     video_model: str
     video_fallback_model: str | None = None

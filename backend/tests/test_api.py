@@ -9,6 +9,7 @@ from app.main import app
 from app.models.schemas import VideoAnalysis
 from app.services import llm_service, transcript_service
 from app.services import openrouter_client
+from app.services import groq_client
 
 
 VIDEO_ID = "dQw4w9WgXcQ"
@@ -45,6 +46,29 @@ def test_free_models_use_only_the_requested_provider(monkeypatch):
     for request, provider in zip(requests[:2], openrouter_client.FREE_MODEL_PROVIDERS.values()):
         assert request["provider"] == {"only": [provider], "allow_fallbacks": False}
     assert "provider" not in requests[2]
+
+
+def test_groq_client_uses_qwen_json_mode(monkeypatch):
+    monkeypatch.setattr(groq_client.settings, "GROQ_API_KEY", "test-key")
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        assert request.headers["Authorization"] == "Bearer test-key"
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok":true}'}}]})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(groq_client.httpx, "AsyncClient", lambda **_: real_client(transport=httpx.MockTransport(respond)))
+    result = asyncio.run(groq_client.GroqClient().chat(
+        [{"role": "user", "content": "test"}], model="qwen/qwen3.8-27b",
+        response_format={"type": "json_object"}, max_tokens=128,
+    ))
+    assert result["choices"][0]["message"]["content"] == '{"ok":true}'
+    assert requests[0]["model"] == "qwen/qwen3.8-27b"
+    assert requests[0]["response_format"] == {"type": "json_object"}
+    assert requests[0]["reasoning_effort"] == "none"
+    asyncio.run(groq_client.GroqClient().chat([{"role": "user", "content": "test"}], model="openai/gpt-oss-20b"))
+    assert "reasoning_effort" not in requests[1]
 
 
 class FakeLLM:
@@ -171,6 +195,32 @@ def test_text_analysis_falls_back_from_gemma_to_qwen(monkeypatch):
     ]
 
 
+def test_text_analysis_uses_groq_before_openrouter_qwen():
+    calls = []
+
+    class OpenRouter:
+        async def chat(self, messages, **kwargs):
+            calls.append(("openrouter", kwargs["model"]))
+            raise llm_service.OpenRouterError(429, "Shared pool full")
+
+    class Groq:
+        async def chat(self, messages, **kwargs):
+            calls.append(("groq", kwargs["model"]))
+            return {"choices": [{"message": {"content": json.dumps({
+                "executive_summary": "Groq summary", "detailed_summary": "Groq details",
+                "key_points": [], "chapters": [], "topics": [],
+            })}}]}
+
+    analysis = asyncio.run(llm_service.LLMService(OpenRouter(), Groq()).generate_full_analysis([
+        {"start_time": 0.0, "end_time": 5.0, "text": "Transcript text"}
+    ]))
+    assert analysis.executive_summary == "Groq summary"
+    assert calls == [
+        ("openrouter", llm_service.settings.OPENROUTER_MODEL),
+        ("groq", llm_service.settings.GROQ_MODEL),
+    ]
+
+
 def test_deep_analysis_is_returned(monkeypatch):
     monkeypatch.setattr(endpoints.settings, "OPENROUTER_API_KEY", "test-key")
     monkeypatch.setattr(endpoints, "LLMService", FakeLLM)
@@ -211,9 +261,11 @@ def test_deep_analysis_keeps_transcript_result_when_visual_provider_is_limited(m
 
 def test_health_names_openrouter(monkeypatch):
     monkeypatch.setattr(endpoints.settings, "OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
     response = TestClient(app).get("/api/health")
     assert response.status_code == 200
     assert response.json()["llm_provider"] == "openrouter"
+    assert response.json()["groq_model"] == "qwen/qwen3.8-27b"
     assert response.json()["multimodal_provider"] is True
 
 
