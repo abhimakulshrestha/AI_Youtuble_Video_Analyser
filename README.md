@@ -7,7 +7,7 @@ A Chrome side panel for evidence-aware YouTube analysis, guided watch plans, a l
 - `google/gemma-4-31b-it:free` handles transcript analysis, questions about the current moment, watch plans, study sets, claim extraction, library comparisons, and web-grounded claim explanations.
 - `qwen/qwen3.8-27b:free` handles slides, charts, diagrams, demonstrations, visual events, and spoken-versus-shown gaps.
 - Qwen also acts as the structured-text fallback when Gemma's provider is temporarily unavailable.
-- Video analysis does not fall back to Gemma because this Gemma endpoint does not accept video. Provider errors are returned directly so availability and account problems stay visible.
+- Visual analysis currently uses Qwen. Although Gemma advertises video input, neither model can reliably decode a YouTube watch-page URL as a video file through OpenRouter. A visual failure leaves the transcript analysis intact and displays a warning.
 - Timestamp evidence is checked deterministically against the transcript after generation. A model cannot mark its own unsupported quote as verified.
 
 ## Local setup
@@ -24,7 +24,7 @@ Check `http://127.0.0.1:8000/api/health` before analyzing a video. Run `python -
 
 OpenRouter currently requires an account balance for video inputs even when the selected model has a `:free` suffix. If visual analysis returns HTTP 402, add the balance requested by OpenRouter; quick transcript analysis continues to work without video input.
 
-The free Gemma and Qwen providers use shared upstream capacity. An HTTP 429 with `temporarily rate-limited upstream` means both configured pools are busy, not that the deployment is broken. Retry later or connect your own Google/Qwen provider key in OpenRouter integrations for dedicated provider limits.
+The free Gemma and Qwen providers use shared upstream capacity. An HTTP 429 with `temporarily rate-limited upstream` means the named provider's pool is busy, not that the deployment is broken. If both pools are busy, transcript analysis cannot complete until capacity returns. Retry later or connect your own Google/Qwen provider key in OpenRouter integrations for dedicated provider limits.
 
 ## Vercel deployment
 
@@ -63,7 +63,7 @@ The API is stateless and suitable for Vercel Functions. The extension stores sav
 
 `matched` means the quoted words occur near the generated timestamp. `uncertain` means nearby transcript exists but the quote did not match. `unsupported` means no nearby transcript supports it. These labels validate source alignment, not the truth of the overall conclusion. Claim Check separately invokes OpenRouter web search and remains `unchecked` unless source citations are returned.
 
-Visual analysis sends the public YouTube URL plus sampled transcript context through OpenRouter. Public-video availability, model availability, and OpenRouter account limits can affect that route. Protect a public deployment with appropriate Vercel rate limits or authentication because every request uses the server-side API key.
+Visual analysis sends the public YouTube watch URL plus sampled transcript context through OpenRouter. OpenRouter's video input expects decodable media, and a watch-page URL can fail even when the model accepts video. Visual output is therefore not guaranteed by the current integration; Deep Analyze preserves transcript results when it fails. Protect a public deployment with appropriate Vercel rate limits or authentication because every request uses the server-side API key.
 
 ## API
 

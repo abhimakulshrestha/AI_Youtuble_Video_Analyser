@@ -253,6 +253,7 @@ export default function App() {
 
             {analysis && visibleTab === 'summary' && (
               <div>
+                {analysis.feature_warnings?.map((warning, index) => <p className="feature-error" key={index}>{warning}</p>)}
                 <h3>Detailed Summary</h3>
                 <ReactMarkdown>{analysis.detailed_summary}</ReactMarkdown>
                 {analysis.deep_analysis?.visual_summary && (

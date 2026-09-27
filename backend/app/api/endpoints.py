@@ -80,9 +80,12 @@ async def analyze_video(request: AnalyzeRequest):
         result["transcript_data"] = transcript
         result["evidence_checks"] = [check.model_dump() for check in check_analysis(analysis, transcript)]
         if request.mode == "deep":
-            result["deep_analysis"] = await MultimodalService().analyze_video(
-                f"https://www.youtube.com/watch?v={video_id}", transcript
-            )
+            try:
+                result["deep_analysis"] = await MultimodalService().analyze_video(
+                    f"https://www.youtube.com/watch?v={video_id}", transcript
+                )
+            except (OpenRouterError, ValueError) as exc:
+                result["feature_warnings"] = [f"Visual analysis unavailable: {exc}"]
         return result
     except Exception as exc:
         raise upstream_failure("Analysis failed", exc) from exc

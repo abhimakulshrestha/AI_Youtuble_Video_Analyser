@@ -190,6 +190,25 @@ def test_deep_analysis_is_returned(monkeypatch):
     assert response.json()["deep_analysis"]["visual_summary"] == "A diagram appears."
 
 
+def test_deep_analysis_keeps_transcript_result_when_visual_provider_is_limited(monkeypatch):
+    monkeypatch.setattr(endpoints.settings, "OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(endpoints, "LLMService", FakeLLM)
+
+    class LimitedMultimodal:
+        async def analyze_video(self, url, transcript=None):
+            raise openrouter_client.OpenRouterError(429, "Qwen is temporarily rate-limited upstream")
+
+    monkeypatch.setattr(endpoints, "MultimodalService", LimitedMultimodal)
+    response = TestClient(app).post(
+        "/api/videos/analyze",
+        json={"url": VIDEO_ID, "mode": "deep", "transcript_data": TRANSCRIPT},
+    )
+    assert response.status_code == 200
+    assert response.json()["executive_summary"] == "Solar power overview"
+    assert "deep_analysis" not in response.json()
+    assert "rate-limited" in response.json()["feature_warnings"][0]
+
+
 def test_health_names_openrouter(monkeypatch):
     monkeypatch.setattr(endpoints.settings, "OPENROUTER_API_KEY", "test-key")
     response = TestClient(app).get("/api/health")
