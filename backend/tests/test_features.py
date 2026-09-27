@@ -151,7 +151,7 @@ def test_video_analysis_uses_openrouter_video_content(monkeypatch):
     assert result["visual_summary"] == "Demo"
 
 
-def test_video_analysis_falls_back_from_qwen_to_gemma(monkeypatch):
+def test_video_analysis_uses_configured_fallback(monkeypatch):
     calls = []
 
     class Client:
@@ -162,9 +162,10 @@ def test_video_analysis_falls_back_from_qwen_to_gemma(monkeypatch):
             return {"choices": [{"message": {"content": '{"visual_summary":"Fallback","visual_events":[],"visual_gaps":[]}'}}]}
 
     monkeypatch.setattr(MultimodalService, "_resolve_video_url", staticmethod(lambda _: "https://media.example/video.mp4"))
+    monkeypatch.setattr(endpoints.settings, "OPENROUTER_VIDEO_FALLBACK_MODEL", "google/gemma-4-31b-it:free")
     result = asyncio.run(MultimodalService(Client()).analyze_video(f"https://www.youtube.com/watch?v={VIDEO_A}", TRANSCRIPT))
     assert result["visual_summary"] == "Fallback"
     assert calls == [
         endpoints.settings.OPENROUTER_VIDEO_MODEL,
-        endpoints.settings.OPENROUTER_VIDEO_FALLBACK_MODEL,
+        "google/gemma-4-31b-it:free",
     ]

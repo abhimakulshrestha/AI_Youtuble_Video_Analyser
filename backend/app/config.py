@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     OPENROUTER_MODEL: str = "google/gemma-4-31b-it:free"
     OPENROUTER_FALLBACK_MODEL: str = "qwen/qwen3.8-27b:free"
     OPENROUTER_VIDEO_MODEL: str = "qwen/qwen3.8-27b:free"
-    OPENROUTER_VIDEO_FALLBACK_MODEL: str = "google/gemma-4-31b-it:free"
+    OPENROUTER_VIDEO_FALLBACK_MODEL: str = ""
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     OPENROUTER_SITE_URL: str = ""
     OPENROUTER_APP_NAME: str = "YouTube AI Analyzer"

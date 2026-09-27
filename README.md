@@ -7,7 +7,7 @@ A Chrome side panel for evidence-aware YouTube analysis, guided watch plans, a l
 - `google/gemma-4-31b-it:free` handles transcript analysis, questions about the current moment, watch plans, study sets, claim extraction, library comparisons, and web-grounded claim explanations.
 - `qwen/qwen3.8-27b:free` handles slides, charts, diagrams, demonstrations, visual events, and spoken-versus-shown gaps.
 - Qwen also acts as the structured-text fallback when Gemma's provider is temporarily unavailable.
-- Gemma is the visual fallback when Qwen is rate-limited, unavailable, or returns invalid JSON. Authentication, permission, and payment errors are returned directly so configuration problems stay visible.
+- Video analysis does not fall back to Gemma because this Gemma endpoint does not accept video. Provider errors are returned directly so availability and account problems stay visible.
 - Timestamp evidence is checked deterministically against the transcript after generation. A model cannot mark its own unsupported quote as verified.
 
 ## Local setup
@@ -37,7 +37,7 @@ OPENROUTER_API_KEY=...
 OPENROUTER_MODEL=google/gemma-4-31b-it:free
 OPENROUTER_FALLBACK_MODEL=qwen/qwen3.8-27b:free
 OPENROUTER_VIDEO_MODEL=qwen/qwen3.8-27b:free
-OPENROUTER_VIDEO_FALLBACK_MODEL=google/gemma-4-31b-it:free
+OPENROUTER_VIDEO_FALLBACK_MODEL=
 OPENROUTER_SITE_URL=https://YOUR-PROJECT.vercel.app
 OPENROUTER_APP_NAME=YouTube AI Analyzer
 OPENROUTER_REASONING_ENABLED=true
