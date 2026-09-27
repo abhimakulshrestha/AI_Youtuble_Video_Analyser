@@ -28,6 +28,25 @@ def test_openrouter_embedded_error_is_not_reported_as_empty_completion(monkeypat
     assert exc.value.status_code == 400
 
 
+def test_free_models_use_only_the_requested_provider(monkeypatch):
+    monkeypatch.setattr(openrouter_client.settings, "OPENROUTER_API_KEY", "test-key")
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "OK"}}]})
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(respond)
+    monkeypatch.setattr(openrouter_client.httpx, "AsyncClient", lambda **_: real_client(transport=transport))
+    client = openrouter_client.OpenRouterClient()
+    for model in (*openrouter_client.FREE_MODEL_PROVIDERS, "google/gemma-4-31b-it"):
+        asyncio.run(client.chat([{"role": "user", "content": "test"}], model=model))
+    for request, provider in zip(requests[:2], openrouter_client.FREE_MODEL_PROVIDERS.values()):
+        assert request["provider"] == {"only": [provider], "allow_fallbacks": False}
+    assert "provider" not in requests[2]
+
+
 class FakeLLM:
     async def generate_full_analysis(self, chunks):
         assert chunks[0]["text"]

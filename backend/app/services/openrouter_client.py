@@ -6,6 +6,12 @@ import httpx
 from app.config import settings
 
 
+FREE_MODEL_PROVIDERS = {
+    "qwen/qwen3.8-27b:free": "modelrun/fp4",
+    "google/gemma-4-31b-it:free": "google-ai-studio",
+}
+
+
 class OpenRouterError(RuntimeError):
     def __init__(self, status_code: int, message: str):
         super().__init__(message)
@@ -42,6 +48,9 @@ class OpenRouterClient:
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+        provider = FREE_MODEL_PROVIDERS.get(payload["model"])
+        if provider:
+            payload["provider"] = {"only": [provider], "allow_fallbacks": False}
         if settings.OPENROUTER_REASONING_ENABLED:
             payload["reasoning"] = {"enabled": True, "exclude": True}
         if tools:
