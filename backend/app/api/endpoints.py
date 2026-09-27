@@ -13,7 +13,6 @@ from app.services.evidence import bound_start, check_analysis, check_excerpt, vi
 from app.services.llm_service import LLMService
 from app.services.multimodal_service import MultimodalService
 from app.services.groq_client import GroqError
-from app.services.openrouter_client import OpenRouterError
 from app.services.transcript_service import TranscriptService
 from app.utils.youtube import extract_video_id, is_valid_youtube_id
 
@@ -21,7 +20,7 @@ router = APIRouter()
 
 
 def upstream_failure(action: str, exc: Exception) -> HTTPException:
-    if isinstance(exc, (OpenRouterError, GroqError)):
+    if isinstance(exc, GroqError):
         status = exc.status_code if exc.status_code in {400, 401, 402, 403, 408, 409, 429} else 502
         return HTTPException(status_code=status, detail=f"{action}: {exc}")
     if isinstance(exc, NotImplementedError):
@@ -56,13 +55,11 @@ def health_check():
     return HealthResponse(
         status="ok",
         transcript_provider=True,
-        rag_provider=bool(settings.OPENROUTER_API_KEY),
-        multimodal_provider=bool(settings.OPENROUTER_API_KEY and settings.OPENROUTER_VIDEO_MODEL),
-        llm_model=settings.OPENROUTER_MODEL,
-        llm_fallback_model=settings.OPENROUTER_FALLBACK_MODEL or None,
-        groq_model=settings.GROQ_MODEL if settings.GROQ_API_KEY else None,
-        video_model=settings.OPENROUTER_VIDEO_MODEL,
-        video_fallback_model=settings.OPENROUTER_VIDEO_FALLBACK_MODEL or None,
+        rag_provider=bool(settings.GROQ_API_KEY),
+        multimodal_provider=bool(settings.GROQ_API_KEY),
+        llm_model=settings.GROQ_MODEL,
+        llm_fallback_model=settings.GROQ_FALLBACK_MODEL or None,
+        video_model=settings.GROQ_VISION_MODEL,
     )
 
 
@@ -71,8 +68,7 @@ async def analyze_video(request: AnalyzeRequest):
     video_id = extract_video_id(request.url)
     if not video_id or not is_valid_youtube_id(video_id):
         raise HTTPException(status_code=400, detail="Invalid YouTube URL or ID")
-    if not settings.OPENROUTER_API_KEY:
-        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server.")
+    require_groq()
 
     transcript = get_transcript_data(video_id, request.language, request.transcript_data)
     chunks = TranscriptService.chunk_transcript(transcript)
@@ -82,12 +78,13 @@ async def analyze_video(request: AnalyzeRequest):
         result["transcript_data"] = transcript
         result["evidence_checks"] = [check.model_dump() for check in check_analysis(analysis, transcript)]
         if request.mode == "deep":
-            try:
-                result["deep_analysis"] = await MultimodalService().analyze_video(
-                    f"https://www.youtube.com/watch?v={video_id}", transcript
-                )
-            except (OpenRouterError, ValueError) as exc:
-                result["feature_warnings"] = [f"Visual analysis unavailable: {exc}"]
+            if request.frames:
+                try:
+                    result["deep_analysis"] = await MultimodalService().analyze_frames(request.frames, transcript)
+                except (GroqError, ValueError) as exc:
+                    result["feature_warnings"] = [f"Visual analysis unavailable: {exc}"]
+            else:
+                result["feature_warnings"] = ["Visual analysis needs frames captured from the YouTube player."]
         return result
     except Exception as exc:
         raise upstream_failure("Analysis failed", exc) from exc
@@ -98,7 +95,7 @@ async def analyze_visuals(video_id: str, request: VisualRequest):
     require_video(video_id)
     try:
         transcript = get_transcript_data(video_id, "en", request.transcript_data)
-        return await MultimodalService().analyze_video(f"https://www.youtube.com/watch?v={video_id}", transcript)
+        return await MultimodalService().analyze_frames(request.frames, transcript)
     except Exception as exc:
         raise upstream_failure("Visual analysis failed", exc) from exc
 
@@ -107,8 +104,7 @@ async def analyze_visuals(video_id: str, request: VisualRequest):
 async def ask_question(video_id: str, request: ChatRequest):
     if not is_valid_youtube_id(video_id):
         raise HTTPException(status_code=400, detail="Invalid video ID")
-    if not settings.OPENROUTER_API_KEY:
-        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server.")
+    require_groq()
 
     transcript = get_transcript_data(video_id, "en", request.transcript_data)
     chunks = TranscriptService.chunk_transcript(transcript)
@@ -139,8 +135,12 @@ def get_transcript(video_id: str, language: str = "en"):
 def require_video(video_id: str) -> None:
     if not is_valid_youtube_id(video_id):
         raise HTTPException(status_code=400, detail="Invalid video ID")
-    if not settings.OPENROUTER_API_KEY:
-        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server.")
+    require_groq()
+
+
+def require_groq() -> None:
+    if not settings.GROQ_API_KEY:
+        raise HTTPException(status_code=503, detail="GROQ_API_KEY is not configured on the server.")
 
 
 def short_context(transcript: list[dict], analysis=None) -> dict:
@@ -213,8 +213,7 @@ async def extract_claims(video_id: str, request: ClaimRequest):
 
 @router.post("/claims/check")
 async def check_claim(request: ClaimCheckRequest):
-    if not settings.OPENROUTER_API_KEY:
-        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server.")
+    require_groq()
     try:
         return await MultimodalService().check_claim(request.claim)
     except Exception as exc:
@@ -223,8 +222,7 @@ async def check_claim(request: ClaimCheckRequest):
 
 @router.post("/videos/compare", response_model=CompareResult)
 async def compare_videos(request: CompareRequest):
-    if not settings.OPENROUTER_API_KEY:
-        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server.")
+    require_groq()
     if len({v.video_id for v in request.videos}) != len(request.videos) or any(not is_valid_youtube_id(v.video_id) for v in request.videos):
         raise HTTPException(status_code=400, detail="Provide distinct valid YouTube videos.")
     try:

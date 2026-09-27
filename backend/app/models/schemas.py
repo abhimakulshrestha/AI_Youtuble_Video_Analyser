@@ -1,4 +1,7 @@
-from pydantic import BaseModel, Field
+import base64
+import binascii
+
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any, Literal
 
 class TimestampEvidence(BaseModel):
@@ -36,12 +39,37 @@ class VideoAnalysis(BaseModel):
     statistics: List[Dict[str, Any]] = Field(default_factory=list)
     action_items: List[Dict[str, Any]] = Field(default_factory=list)
     conclusions: List[str] = Field(default_factory=list)
+
+    @field_validator("conclusions", mode="before")
+    @classmethod
+    def normalize_conclusions(cls, value: Any) -> Any:
+        return [value] if isinstance(value, str) else value
+
+class VideoFrame(BaseModel):
+    start: float = Field(ge=0)
+    image: str
+
+    @field_validator("image")
+    @classmethod
+    def validate_image(cls, value: str) -> str:
+        header, separator, encoded = value.partition(",")
+        if header not in {"data:image/jpeg;base64", "data:image/png;base64"} or not separator or len(value) > 340_000:
+            raise ValueError("Frame must be a JPEG or PNG data URL under 250 KB.")
+        try:
+            image = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("Frame has invalid base64 data.") from exc
+        valid = image.startswith(b"\xff\xd8\xff") if "jpeg" in header else image.startswith(b"\x89PNG\r\n\x1a\n")
+        if not valid or len(image) < 20 or len(image) > 250_000:
+            raise ValueError("Frame must contain an image under 250 KB.")
+        return value
     
 class AnalyzeRequest(BaseModel):
     url: str
     language: str = "en"
     mode: Literal["quick", "deep"] = "quick"
     transcript_data: Optional[List[Dict[str, Any]]] = None
+    frames: Optional[List[VideoFrame]] = Field(default=None, max_length=3)
 
 class ChatRequest(BaseModel):
     question: str
@@ -65,9 +93,7 @@ class HealthResponse(BaseModel):
     transcript_provider: bool
     rag_provider: bool
     multimodal_provider: bool
-    llm_provider: str = "openrouter"
+    llm_provider: str = "groq"
     llm_model: str
     llm_fallback_model: str | None = None
-    groq_model: str | None = None
     video_model: str
-    video_fallback_model: str | None = None

@@ -8,7 +8,6 @@ from app.api import endpoints
 from app.main import app
 from app.models.schemas import VideoAnalysis
 from app.services import llm_service, transcript_service
-from app.services import openrouter_client
 from app.services import groq_client
 
 
@@ -17,35 +16,7 @@ TRANSCRIPT = [
     {"text": "A useful explanation of solar power.", "start": 0.0, "duration": 5.0},
     {"text": "Solar panels turn sunlight into electricity.", "start": 5.0, "duration": 5.0},
 ]
-
-
-def test_openrouter_embedded_error_is_not_reported_as_empty_completion(monkeypatch):
-    monkeypatch.setattr(openrouter_client.settings, "OPENROUTER_API_KEY", "test-key")
-    real_client = httpx.AsyncClient
-    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"error": {"code": 400, "message": '{"message":"Could not decode video"}'}}))
-    monkeypatch.setattr(openrouter_client.httpx, "AsyncClient", lambda **_: real_client(transport=transport))
-    with pytest.raises(openrouter_client.OpenRouterError, match="Could not decode video") as exc:
-        asyncio.run(openrouter_client.OpenRouterClient().chat([{"role": "user", "content": "test"}]))
-    assert exc.value.status_code == 400
-
-
-def test_free_models_use_only_the_requested_provider(monkeypatch):
-    monkeypatch.setattr(openrouter_client.settings, "OPENROUTER_API_KEY", "test-key")
-    requests = []
-
-    def respond(request):
-        requests.append(json.loads(request.content))
-        return httpx.Response(200, json={"choices": [{"message": {"content": "OK"}}]})
-
-    real_client = httpx.AsyncClient
-    transport = httpx.MockTransport(respond)
-    monkeypatch.setattr(openrouter_client.httpx, "AsyncClient", lambda **_: real_client(transport=transport))
-    client = openrouter_client.OpenRouterClient()
-    for model in (*openrouter_client.FREE_MODEL_PROVIDERS, "google/gemma-4-31b-it"):
-        asyncio.run(client.chat([{"role": "user", "content": "test"}], model=model))
-    for request, provider in zip(requests[:2], openrouter_client.FREE_MODEL_PROVIDERS.values()):
-        assert request["provider"] == {"only": [provider], "allow_fallbacks": False}
-    assert "provider" not in requests[2]
+FRAME = {"start": 2.0, "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlX8AAAAASUVORK5CYII="}
 
 
 def test_groq_client_uses_qwen_json_mode(monkeypatch):
@@ -113,7 +84,7 @@ def test_transcript_api_objects_are_normalized(monkeypatch):
 
 
 def test_analyze_ask_and_cors(monkeypatch):
-    monkeypatch.setattr(endpoints.settings, "OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
     monkeypatch.setattr(endpoints, "LLMService", FakeLLM)
     client = TestClient(app)
     preflight = client.options(
@@ -143,7 +114,7 @@ def test_analyze_ask_and_cors(monkeypatch):
 
 
 def test_missing_transcript_is_client_error(monkeypatch):
-    monkeypatch.setattr(endpoints.settings, "OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
     monkeypatch.setattr(endpoints.TranscriptService, "fetch_transcript", lambda *_: [])
     response = TestClient(app).post(
         "/api/videos/analyze", json={"url": f"https://www.youtube.com/watch?v={VIDEO_ID}"}
@@ -152,7 +123,7 @@ def test_missing_transcript_is_client_error(monkeypatch):
     assert "transcript" in response.json()["detail"].lower()
 
 
-def test_openrouter_completion_is_parsed():
+def test_groq_completion_is_parsed():
     payload = json.dumps({
         "executive_summary": "Summary", "detailed_summary": "Details",
         "key_points": [], "chapters": [], "topics": [],
@@ -170,14 +141,22 @@ def test_openrouter_completion_is_parsed():
     assert analysis.executive_summary == "Summary"
 
 
-def test_text_analysis_falls_back_from_gemma_to_qwen(monkeypatch):
+def test_single_conclusion_from_groq_is_normalized():
+    analysis = VideoAnalysis.model_validate({
+        "executive_summary": "Summary", "detailed_summary": "Details",
+        "key_points": [], "chapters": [], "topics": [], "conclusions": "One conclusion",
+    })
+    assert analysis.conclusions == ["One conclusion"]
+
+
+def test_text_analysis_falls_back_from_gpt_oss_to_qwen():
     calls = []
 
     class Client:
         async def chat(self, messages, **kwargs):
             calls.append(kwargs["model"])
             if len(calls) == 1:
-                raise llm_service.OpenRouterError(503, "Gemma provider unavailable")
+                raise llm_service.GroqError(503, "GPT-OSS unavailable")
             return {"choices": [{"message": {"content": json.dumps({
                 "executive_summary": "Fallback summary",
                 "detailed_summary": "Fallback details",
@@ -189,69 +168,40 @@ def test_text_analysis_falls_back_from_gemma_to_qwen(monkeypatch):
         {"start_time": 0.0, "end_time": 5.0, "text": "Transcript text"}
     ]))
     assert analysis.executive_summary == "Fallback summary"
-    assert calls == [
-        llm_service.settings.OPENROUTER_MODEL,
-        llm_service.settings.OPENROUTER_FALLBACK_MODEL,
-    ]
-
-
-def test_text_analysis_uses_groq_before_openrouter_qwen():
-    calls = []
-
-    class OpenRouter:
-        async def chat(self, messages, **kwargs):
-            calls.append(("openrouter", kwargs["model"]))
-            raise llm_service.OpenRouterError(429, "Shared pool full")
-
-    class Groq:
-        async def chat(self, messages, **kwargs):
-            calls.append(("groq", kwargs["model"]))
-            return {"choices": [{"message": {"content": json.dumps({
-                "executive_summary": "Groq summary", "detailed_summary": "Groq details",
-                "key_points": [], "chapters": [], "topics": [],
-            })}}]}
-
-    analysis = asyncio.run(llm_service.LLMService(OpenRouter(), Groq()).generate_full_analysis([
-        {"start_time": 0.0, "end_time": 5.0, "text": "Transcript text"}
-    ]))
-    assert analysis.executive_summary == "Groq summary"
-    assert calls == [
-        ("openrouter", llm_service.settings.OPENROUTER_MODEL),
-        ("groq", llm_service.settings.GROQ_MODEL),
-    ]
+    assert calls == [llm_service.settings.GROQ_MODEL, llm_service.settings.GROQ_FALLBACK_MODEL]
 
 
 def test_deep_analysis_is_returned(monkeypatch):
-    monkeypatch.setattr(endpoints.settings, "OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
     monkeypatch.setattr(endpoints, "LLMService", FakeLLM)
 
     class FakeMultimodal:
-        async def analyze_video(self, url, transcript=None):
-            assert url == f"https://www.youtube.com/watch?v={VIDEO_ID}"
+        async def analyze_frames(self, frames, transcript):
+            assert frames[0].start == 2.0
             assert transcript == TRANSCRIPT
             return {"visual_summary": "A diagram appears.", "visual_events": [], "visual_gaps": []}
 
     monkeypatch.setattr(endpoints, "MultimodalService", FakeMultimodal)
     response = TestClient(app).post(
         "/api/videos/analyze",
-        json={"url": VIDEO_ID, "mode": "deep", "transcript_data": TRANSCRIPT},
+        json={"url": VIDEO_ID, "mode": "deep", "transcript_data": TRANSCRIPT, "frames": [FRAME]},
     )
     assert response.status_code == 200, response.text
     assert response.json()["deep_analysis"]["visual_summary"] == "A diagram appears."
 
 
 def test_deep_analysis_keeps_transcript_result_when_visual_provider_is_limited(monkeypatch):
-    monkeypatch.setattr(endpoints.settings, "OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
     monkeypatch.setattr(endpoints, "LLMService", FakeLLM)
 
     class LimitedMultimodal:
-        async def analyze_video(self, url, transcript=None):
-            raise openrouter_client.OpenRouterError(429, "Qwen is temporarily rate-limited upstream")
+        async def analyze_frames(self, frames, transcript):
+            raise groq_client.GroqError(429, "Qwen is rate-limited")
 
     monkeypatch.setattr(endpoints, "MultimodalService", LimitedMultimodal)
     response = TestClient(app).post(
         "/api/videos/analyze",
-        json={"url": VIDEO_ID, "mode": "deep", "transcript_data": TRANSCRIPT},
+        json={"url": VIDEO_ID, "mode": "deep", "transcript_data": TRANSCRIPT, "frames": [FRAME]},
     )
     assert response.status_code == 200
     assert response.json()["executive_summary"] == "Solar power overview"
@@ -259,13 +209,13 @@ def test_deep_analysis_keeps_transcript_result_when_visual_provider_is_limited(m
     assert "rate-limited" in response.json()["feature_warnings"][0]
 
 
-def test_health_names_openrouter(monkeypatch):
-    monkeypatch.setattr(endpoints.settings, "OPENROUTER_API_KEY", "test-key")
+def test_health_names_groq(monkeypatch):
     monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
     response = TestClient(app).get("/api/health")
     assert response.status_code == 200
-    assert response.json()["llm_provider"] == "openrouter"
-    assert response.json()["groq_model"] == "qwen/qwen3.8-27b"
+    assert response.json()["llm_provider"] == "groq"
+    assert response.json()["llm_model"] == "openai/gpt-oss-20b"
+    assert response.json()["video_model"] == "qwen/qwen3.8-27b"
     assert response.json()["multimodal_provider"] is True
 
 

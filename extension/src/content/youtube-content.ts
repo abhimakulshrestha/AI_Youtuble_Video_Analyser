@@ -168,6 +168,20 @@ async function fetchTranscriptFromDOM(): Promise<any[] | null> {
   }
 }
 
+async function seekFrame(video: HTMLVideoElement, time: number): Promise<void> {
+  if (Math.abs(video.currentTime - time) < 0.15) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => { video.removeEventListener('seeked', done); reject(new Error('Timed out seeking the video.')); }, 6000);
+    const done = () => { window.clearTimeout(timer); resolve(); };
+    video.addEventListener('seeked', done, { once: true });
+    video.currentTime = time;
+  });
+  await new Promise<void>(resolve => {
+    const timer = window.setTimeout(resolve, 700);
+    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(() => { window.clearTimeout(timer); resolve(); });
+  });
+}
+
 chrome.runtime.onMessage.addListener((message: any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
   if (message.type === 'GET_VIDEO_CONTEXT') {
     (async () => {
@@ -192,6 +206,20 @@ chrome.runtime.onMessage.addListener((message: any, _sender: chrome.runtime.Mess
   if (message.type === 'GET_PLAYER_STATE') {
     const video = getVideoElement();
     sendResponse({ videoId: new URLSearchParams(window.location.search).get('v'), currentTime: video?.currentTime ?? 0, duration: video?.duration ?? 0, paused: video?.paused ?? true });
+    return true;
+  }
+  if (message.type === 'CAPTURE_FRAME') {
+    const video = getVideoElement();
+    if (message.videoId !== new URLSearchParams(window.location.search).get('v') || !video || !Number.isFinite(video.duration)) {
+      sendResponse({ error: 'The video changed or is not ready for frame capture.' });
+      return true;
+    }
+    video.pause();
+    const time = Math.min(Math.max(0, Number(message.time) || 0), Math.max(0, video.duration - 0.2));
+    void seekFrame(video, time).then(() => {
+      const rect = video.getBoundingClientRect();
+      sendResponse({ start: time, rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, viewport: { width: window.innerWidth, height: window.innerHeight } });
+    }).catch(error => sendResponse({ error: String(error) }));
     return true;
   }
   if (message.type === 'PAUSE_VIDEO') {

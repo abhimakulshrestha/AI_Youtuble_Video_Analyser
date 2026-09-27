@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YouTube AI Analyzer",
   "version": "1.0.0",
-  "description": "Analyze YouTube videos with Gemma and Qwen.",
+  "description": "Analyze YouTube videos with Groq Qwen.",
   "permissions": [
     "sidePanel",
     "activeTab"

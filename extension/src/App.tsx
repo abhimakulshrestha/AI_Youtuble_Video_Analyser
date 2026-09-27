@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { api, type VideoAnalysis, type TranscriptSegment } from './shared/api';
+import { api, type VideoAnalysis, type TranscriptSegment, type VideoFrame } from './shared/api';
 import { library, type SavedVideo } from './shared/library';
 import { FeatureViews } from './FeatureViews';
 import { Bookmark, BookmarkCheck } from 'lucide-react';
@@ -139,21 +139,75 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
+      const captureVisualFrames = async (): Promise<VideoFrame[]> => {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tabId = tabs[0]?.id;
+        const duration = playerState?.duration || videoContext.duration || 0;
+        if (!tabId || !Number.isFinite(duration) || duration <= 0) throw new Error('The player is not ready for visual analysis.');
+        const times = Array.from(new Set(Array.from({ length: 3 }, (_, index) => Math.round(duration * (index + 0.5) / 3 * 10) / 10)));
+        const originalTime = playerState?.currentTime ?? videoContext.currentTime;
+        const wasPaused = playerState?.paused ?? true;
+        const frames: VideoFrame[] = [];
+        let lastCapture = 0;
+        try {
+          for (const time of times) {
+            const frame = await chrome.tabs.sendMessage(tabId, { type: 'CAPTURE_FRAME', videoId, time });
+            if (frame?.error || !frame?.rect?.width || !frame?.rect?.height) throw new Error(frame?.error || 'The video is outside the visible tab.');
+            await new Promise(resolve => setTimeout(resolve, Math.max(0, 550 - (Date.now() - lastCapture))));
+            const screenshot = await chrome.tabs.captureVisibleTab(tabs[0].windowId, { format: 'jpeg', quality: 70 });
+            lastCapture = Date.now();
+            const image = new Image();
+            image.src = screenshot;
+            await image.decode();
+            const scaleX = image.naturalWidth / frame.viewport.width;
+            const scaleY = image.naturalHeight / frame.viewport.height;
+            const x = Math.max(0, frame.rect.x * scaleX);
+            const y = Math.max(0, frame.rect.y * scaleY);
+            const width = Math.min(frame.rect.width * scaleX, image.naturalWidth - x);
+            const height = Math.min(frame.rect.height * scaleY, image.naturalHeight - y);
+            if (width <= 0 || height <= 0) throw new Error('The video is outside the visible tab.');
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.min(960, Math.round(width));
+            canvas.height = Math.round(canvas.width * height / width);
+            const context = canvas.getContext('2d');
+            if (!context) throw new Error('Unable to prepare a video frame.');
+            context.drawImage(image, x, y, width, height, 0, 0, canvas.width, canvas.height);
+            let encoded = canvas.toDataURL('image/jpeg', 0.7);
+            if (encoded.length > 330_000) encoded = canvas.toDataURL('image/jpeg', 0.45);
+            if (encoded.length > 330_000) {
+              canvas.width = Math.min(720, Math.round(width));
+              canvas.height = Math.round(canvas.width * height / width);
+              context.drawImage(image, x, y, width, height, 0, 0, canvas.width, canvas.height);
+              encoded = canvas.toDataURL('image/jpeg', 0.45);
+            }
+            if (encoded.length > 330_000) throw new Error('A video frame exceeds the upload limit.');
+            frames.push({ start: frame.start, image: encoded });
+          }
+        } finally {
+          await chrome.tabs.sendMessage(tabId, { type: 'SEEK_TO', time: originalTime, play: !wasPaused }).catch(() => {});
+        }
+        return frames;
+      };
       if (mode === 'deep' && analysis && videoContext.videoId) {
-        const deep_analysis = await api.visual(videoContext.videoId, transcriptData || analysis.transcript_data);
+        const frames = await captureVisualFrames();
+        const deep_analysis = await api.visual(videoContext.videoId, transcriptData || analysis.transcript_data || [], frames);
         if (activeVideoId.current !== videoId) return;
         setAnalysis({ ...analysis, deep_analysis });
         setActiveTab('timeline');
         return;
       }
-      let transcript_data = videoContext.transcript_data;
-      if (!transcript_data && videoContext.videoId) {
-          transcript_data = await api.fetchTranscriptNatively(videoContext.videoId) || undefined;
+      const transcript_data = videoContext.transcript_data;
+      let frames: VideoFrame[] | undefined;
+      let captureError: string | undefined;
+      if (mode === 'deep') {
+        try { frames = await captureVisualFrames(); }
+        catch (error) { captureError = error instanceof Error ? error.message : String(error); }
       }
-      const result = await api.analyzeVideo(videoContext.url, transcript_data, mode);
+      const result = await api.analyzeVideo(videoContext.url, transcript_data, mode, frames);
       if (activeVideoId.current !== videoId) return;
       setTranscriptData(result.transcript_data || transcript_data);
       setAnalysis(result);
+      if (captureError) setError(`Visual capture unavailable: ${captureError}`);
       setActiveTab('summary');
     } catch (err: any) {
       if (activeVideoId.current === videoId) setError(err.message || 'Failed to analyze video');

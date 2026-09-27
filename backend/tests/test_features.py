@@ -5,8 +5,9 @@ from app.main import app
 from app.models.schemas import VideoAnalysis, KeyPoint, TimestampEvidence
 from app.services.evidence import check_analysis, check_excerpt
 from app.services.multimodal_service import MultimodalService
+from app.models.schemas import VideoFrame
 import asyncio
-from app.services.openrouter_client import OpenRouterError
+from app.services.groq_client import GroqError
 
 
 VIDEO_A = "dQw4w9WgXcQ"
@@ -15,6 +16,7 @@ TRANSCRIPT = [
     {"text": "Solar panels turn sunlight into electricity.", "start": 5, "duration": 5},
     {"text": "The inverter changes direct current to alternating current.", "start": 10, "duration": 5},
 ]
+FRAME = {"start": 5, "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlX8AAAAASUVORK5CYII="}
 ANALYSIS = VideoAnalysis(
     executive_summary="Solar basics", detailed_summary="Solar panels and an inverter.",
     key_points=[KeyPoint(title="Panels", explanation="They generate power", evidence=[TimestampEvidence(start=5, end=10, text="Solar panels turn sunlight into electricity")])],
@@ -48,8 +50,8 @@ class FakeMultimodal:
     async def check_claim(self, claim):
         return {"claim": claim, "verdict": "supported", "explanation": "The source confirms it.", "sources": [{"title": "Source", "url": "https://example.org/solar"}]}
 
-    async def analyze_video(self, url, transcript=None):
-        assert url == f"https://www.youtube.com/watch?v={VIDEO_A}"
+    async def analyze_frames(self, frames, transcript):
+        assert frames[0].start == 5
         return {"visual_summary": "A solar diagram is shown.", "visual_events": [{"start": 5, "kind": "diagram", "description": "Panel wiring"}], "visual_gaps": []}
 
 
@@ -61,7 +63,7 @@ def test_evidence_grading():
 
 
 def test_feature_routes(monkeypatch):
-    monkeypatch.setattr(endpoints.settings, "OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
     monkeypatch.setattr(endpoints, "LLMService", FakeLLM)
     monkeypatch.setattr(endpoints, "MultimodalService", FakeMultimodal)
     monkeypatch.setattr(endpoints.TranscriptService, "fetch_transcript", lambda *_: TRANSCRIPT)
@@ -86,7 +88,7 @@ def test_feature_routes(monkeypatch):
     assert checked.status_code == 200, checked.text
     assert checked.json()["sources"][0]["url"] == "https://example.org/solar"
 
-    visual = client.post(f"/api/videos/{VIDEO_A}/visual", json={"transcript_data": TRANSCRIPT})
+    visual = client.post(f"/api/videos/{VIDEO_A}/visual", json={"transcript_data": TRANSCRIPT, "frames": [FRAME]})
     assert visual.status_code == 200, visual.text
     assert visual.json()["visual_events"][0]["kind"] == "diagram"
 
@@ -102,15 +104,15 @@ def test_feature_routes(monkeypatch):
 
 
 def test_quota_error_has_actionable_status(monkeypatch):
-    monkeypatch.setattr(endpoints.settings, "OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
 
     class QuotaMultimodal:
-        async def analyze_video(self, url, transcript=None):
-            raise OpenRouterError(429, "OpenRouter request failed: rate limit exceeded")
+        async def analyze_frames(self, frames, transcript):
+            raise GroqError(429, "Groq rate limit exceeded")
 
     monkeypatch.setattr(endpoints, "MultimodalService", QuotaMultimodal)
     monkeypatch.setattr(endpoints.TranscriptService, "fetch_transcript", lambda *_: TRANSCRIPT)
-    response = TestClient(app).post(f"/api/videos/{VIDEO_A}/visual", json={})
+    response = TestClient(app).post(f"/api/videos/{VIDEO_A}/visual", json={"frames": [FRAME]})
     assert response.status_code == 429
     assert "rate limit" in response.json()["detail"].lower()
 
@@ -118,10 +120,10 @@ def test_quota_error_has_actionable_status(monkeypatch):
 def test_search_citations_determine_checked_status():
     class Client:
         async def chat(self, messages, **kwargs):
-            assert kwargs["tools"][0]["type"] == "openrouter:web_search"
+            assert kwargs["tools"][0]["type"] == "browser_search"
             return {"choices": [{"message": {
-                "content": "SUPPORTED: confirmed by the source",
-                "annotations": [{"type": "url_citation", "url_citation": {"url": "https://example.org/solar", "title": "Solar source"}}],
+                "content": "**SUPPORTED**: confirmed by the source",
+                "executed_tools": [{"search_results": {"results": [{"url": "https://example.org/solar", "title": "Solar source"}]}}],
             }}]}
 
     service = MultimodalService(Client())
@@ -131,39 +133,29 @@ def test_search_citations_determine_checked_status():
 
     class NoCitationClient:
         async def chat(self, messages, **kwargs):
-            return {"choices": [{"message": {"content": "SUPPORTED", "annotations": []}}]}
+            return {"choices": [{"message": {"content": "SUPPORTED", "executed_tools": []}}]}
 
     unchecked = asyncio.run(MultimodalService(NoCitationClient()).check_claim("Solar panels convert sunlight."))
     assert unchecked.verdict == "unchecked"
 
 
-def test_video_analysis_uses_openrouter_video_content(monkeypatch):
+def test_video_analysis_uses_groq_images():
     class Client:
         async def chat(self, messages, **kwargs):
             content = messages[0]["content"]
-            assert content[1] == {"type": "video_url", "video_url": {"url": f"https://www.youtube.com/watch?v={VIDEO_A}"}}
-            assert kwargs["model"] == endpoints.settings.OPENROUTER_VIDEO_MODEL
+            assert content[2] == {"type": "image_url", "image_url": {"url": FRAME["image"]}}
+            assert kwargs["model"] == endpoints.settings.GROQ_VISION_MODEL
             assert kwargs["response_format"] == {"type": "json_object"}
-            return {"choices": [{"message": {"content": '{"visual_summary":"Demo","visual_events":[],"visual_gaps":[]}'}}]}
+            return {"choices": [{"message": {"content": '{"visual_summary":"Demo","visual_events":[{"start":5,"kind":"slide","description":"Solar diagram"}],"visual_gaps":[]}'}}]}
 
-    result = asyncio.run(MultimodalService(Client()).analyze_video(f"https://www.youtube.com/watch?v={VIDEO_A}", TRANSCRIPT))
-    assert result["visual_summary"] == "Demo"
+    result = asyncio.run(MultimodalService(Client()).analyze_frames([VideoFrame(**FRAME)], TRANSCRIPT))
+    assert result["visual_summary"] == "Sampled 1 frames. Demo"
+    assert result["visual_events"][0]["start"] == 5
 
 
-def test_video_analysis_uses_configured_fallback(monkeypatch):
-    calls = []
-
-    class Client:
-        async def chat(self, messages, **kwargs):
-            calls.append(kwargs["model"])
-            if len(calls) == 1:
-                raise OpenRouterError(429, "Qwen provider is rate limited")
-            return {"choices": [{"message": {"content": '{"visual_summary":"Fallback","visual_events":[],"visual_gaps":[]}'}}]}
-
-    monkeypatch.setattr(endpoints.settings, "OPENROUTER_VIDEO_FALLBACK_MODEL", "google/gemma-4-31b-it:free")
-    result = asyncio.run(MultimodalService(Client()).analyze_video(f"https://www.youtube.com/watch?v={VIDEO_A}", TRANSCRIPT))
-    assert result["visual_summary"] == "Fallback"
-    assert calls == [
-        endpoints.settings.OPENROUTER_VIDEO_MODEL,
-        "google/gemma-4-31b-it:free",
-    ]
+def test_visual_route_rejects_missing_or_invalid_frames(monkeypatch):
+    monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
+    client = TestClient(app)
+    assert client.post(f"/api/videos/{VIDEO_A}/visual", json={"transcript_data": TRANSCRIPT}).status_code == 422
+    assert client.post(f"/api/videos/{VIDEO_A}/visual", json={"transcript_data": TRANSCRIPT, "frames": [{"start": 5, "image": "https://example.org/x.jpg"}]}).status_code == 422
+    assert client.post(f"/api/videos/{VIDEO_A}/visual", json={"transcript_data": TRANSCRIPT, "frames": [FRAME] * 4}).status_code == 422

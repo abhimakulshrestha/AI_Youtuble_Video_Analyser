@@ -7,16 +7,13 @@ flowchart LR
     SP --> IDB[Extension IndexedDB]
     SP --> API[FastAPI on Vercel or localhost]
     API --> CAP[YouTube captions fallback]
-    API --> OR[OpenRouter]
-    OR --> GEM[Gemma 4 31B]
-    OR --> QWEN[Qwen 3.8 27B]
-    OR --> SEARCH[OpenRouter web search]
+    API --> GROQ[Groq]
+    GROQ --> TEXT[GPT-OSS text and search]
+    GROQ --> VISION[Qwen images and text fallback]
 ```
 
-The content script reads the current URL, player time, duration, and captions without injecting inline page scripts. The side panel polls player state for the live companion and sends seek/play/pause commands back to the content script. Captions discovered by the page are included in requests; when absent, the API tries `youtube-transcript-api` and `yt-dlp`.
+The content script reads the current video context and captions without inline page scripts. The side panel polls playback for the live companion and can seek to evidence timestamps. For deep analysis, it seeks to three sampled timestamps, captures the visible tab, crops each screenshot to the player, and restores playback. Frames and nearby captions are sent to Groq Qwen in one call. Visual findings refer only to sampled frames.
 
-Gemma produces the structured transcript analysis, watch plans, moment-aware answers, quizzes, flashcards, factual claim candidates, and multi-video comparisons. Qwen receives the public YouTube URL plus sampled transcript context and identifies visual events and information shown but barely spoken. Video errors are returned directly because the configured Gemma endpoint does not accept video input.
+Groq GPT-OSS produces structured transcript analyses, plans, moment-aware answers, quizzes, flashcards, factual claim candidates, and multi-video comparisons. Qwen is the text fallback. Generated transcript timestamps and excerpts pass deterministic evidence checks before reaching the UI. Claim Check uses GPT-OSS browser search and labels a verdict only when search results include external URLs.
 
-Generated transcript timestamps and excerpts pass through deterministic evidence checks before reaching the UI. Claim Check is a separate Gemma request with the OpenRouter web-search tool; a claim is labelled checked only when the provider returns URL citations. The extension renders those source links beside the claim.
-
-The backend stores no database or vector index, which keeps Vercel Functions stateless. The personal knowledge library uses IndexedDB in the Chrome extension. Cross-device synchronization would require a separate authenticated backend store.
+The backend stores no database or vector index. The personal library uses extension-local IndexedDB; cross-device synchronization would require an authenticated backend store.

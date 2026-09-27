@@ -1,85 +1,41 @@
 # YouTube AI Analyzer
 
-A Chrome side panel for evidence-aware YouTube analysis, guided watch plans, a live companion, study tools, visual insight extraction, and cross-video comparison. The FastAPI backend uses OpenRouter with Gemma for transcript reasoning and Qwen for video understanding.
+A Chrome side panel for transcript analysis, goal-based watch plans, a live companion, a local knowledge library, visual insights, evidence timelines, claim checks, video comparisons, and study tools.
 
-## Model roles
+## Models and evidence
 
-- `google/gemma-4-31b-it:free` handles transcript analysis, questions about the current moment, watch plans, study sets, claim extraction, library comparisons, and web-grounded claim explanations.
-- `qwen/qwen3.8-27b:free` handles slides, charts, diagrams, demonstrations, visual events, and spoken-versus-shown gaps.
-- Qwen also acts as the structured-text fallback when Gemma's provider is temporarily unavailable.
-- When `GROQ_API_KEY` is set, Groq's `qwen/qwen3.8-27b` is tried before the OpenRouter Qwen text fallback. The isolated `backend/app/services/groq_client.py` uses Groq's chat API and JSON mode; it does not receive raw video URLs.
-- Visual analysis currently uses Qwen. Although Gemma advertises video input, neither model can reliably decode a YouTube watch-page URL as a video file through OpenRouter. A visual failure leaves the transcript analysis intact and displays a warning.
-- Timestamp evidence is checked deterministically against the transcript after generation. A model cannot mark its own unsupported quote as verified.
+- Groq `openai/gpt-oss-20b` handles transcript analysis, Q&A, plans, study sets, claim extraction, and comparisons. `qwen/qwen3.8-27b` is its text fallback.
+- Groq Qwen analyzes timestamped screenshots captured from the visible YouTube player. It does not receive or decode a YouTube URL as video. Deep analysis samples three frames; it cannot see every moment. The extension temporarily seeks through the video and restores playback afterward.
+- Groq GPT-OSS browser search checks individual claims against outside sources. Unchecked claims are labeled as such. Transcript evidence labels indicate quote/timestamp alignment, not independent factual truth.
 
 ## Local setup
 
-Requires Python 3.12, Node.js, and an OpenRouter API key.
+Requires Python 3.12, Node.js, and a Groq API key.
 
-1. Install dependencies from the repository root: `python -m pip install -r requirements.txt`.
-2. Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`. Optionally set `GROQ_API_KEY` to enable the Qwen text fallback.
-3. Start the API: `cd backend`, then `uvicorn app.main:app --reload --port 8000`.
-4. In another terminal run `cd extension`, `npm ci`, then `npm run build -- --mode development` for the local API. Plain `npm run build` targets the deployed API.
-5. In `chrome://extensions`, enable Developer mode and load `extension/dist` as an unpacked extension. Refresh open YouTube tabs after reloading it.
+1. Run `python -m pip install -r requirements.txt` from the repository root.
+2. Copy `.env.example` to `.env` and set `GROQ_API_KEY`.
+3. Start the API with `cd backend` and `uvicorn app.main:app --reload --port 8000`.
+4. In another terminal, run `cd extension`, `npm ci`, then `npm run build -- --mode development` to target the local API. Plain `npm run build` targets the deployed API configured in `extension/.env.production`.
+5. In `chrome://extensions`, enable Developer mode and load `extension/dist` unpacked. Reload the extension and refresh YouTube tabs after rebuilding.
 
-Check `http://127.0.0.1:8000/api/health` before analyzing a video. Run `python -m pytest -q` from the repository root for backend tests and `npm run lint` in `extension` for frontend linting.
+Check `http://127.0.0.1:8000/api/health`. Run `python -m pytest -q` and `cd extension; npm run lint; npm run build` for local checks. A live Groq request is still needed to prove provider availability; HTTP 429 may mean a model-specific rate limit. Qwen's free-tier image input limit is especially tight, so repeated deep scans may require a wait.
 
-OpenRouter currently requires an account balance for video inputs even when the selected model has a `:free` suffix. If visual analysis returns HTTP 402, add the balance requested by OpenRouter; quick transcript analysis continues to work without video input.
+## Vercel
 
-The free Gemma and Qwen providers use shared upstream capacity. An HTTP 429 with `temporarily rate-limited upstream` means the named provider's pool is busy, not that the deployment is broken. If both pools are busy, transcript analysis cannot complete until capacity returns. Retry later or connect your own Google/Qwen provider key in OpenRouter integrations for dedicated provider limits.
+The repository root is the Vercel project root. Root `main.py` exposes the FastAPI app and root `requirements.txt` installs dependencies. Set **Production** `GROQ_API_KEY` in the Vercel project; `.env` stays local. Optional model variables are shown in `.env.example`. Redeploy after changing environment variables, then check `https://YOUR-PROJECT.vercel.app/api/health` and make a real analysis request.
 
-## Vercel deployment
+The extension build must use the deployed API URL in `VITE_API_BASE_URL`, for example `https://YOUR-PROJECT.vercel.app/api`; the build adds that origin to its host permissions. Do not put `GROQ_API_KEY` in the extension. The API is public and uses the server-side key, so add authentication or rate limiting before broad distribution.
 
-The **backend** is the Vercel project. Import this repository with the repository root as its Root Directory. Vercel discovers root `main.py` and installs root `requirements.txt`; the app code lives in `backend/app`.
-
-Set these Vercel environment variables:
-
-```text
-OPENROUTER_API_KEY=...
-OPENROUTER_MODEL=google/gemma-4-31b-it:free
-OPENROUTER_FALLBACK_MODEL=qwen/qwen3.8-27b:free
-OPENROUTER_VIDEO_MODEL=qwen/qwen3.8-27b:free
-OPENROUTER_VIDEO_FALLBACK_MODEL=
-OPENROUTER_SITE_URL=https://YOUR-PROJECT.vercel.app
-OPENROUTER_APP_NAME=YouTube AI Analyzer
-OPENROUTER_REASONING_ENABLED=true
-GROQ_API_KEY=...
-GROQ_MODEL=qwen/qwen3.8-27b
-```
-
-Add `GROQ_API_KEY` to Vercel's production environment and redeploy to enable the Groq fallback there. A local `.env` value does not reach Vercel. `/api/health` reports `groq_model` only when the deployed key is configured.
-
-`CORS_ALLOWED_ORIGIN_REGEX` defaults to Chrome extension origins. Verify `https://YOUR-PROJECT.vercel.app/api/health` after deployment. The local `.env` file is never uploaded automatically.
-
-For a CLI deployment, run `vercel link` and `vercel deploy --prod` from the repository root after adding the environment variables to the linked Vercel project.
-
-Build the extension against the deployed API:
-
-```powershell
-cd extension
-$env:VITE_API_BASE_URL = "https://YOUR-PROJECT.vercel.app/api"
-npm run build
-```
-
-The build adds the API origin to `dist/manifest.json` host permissions. Reload the unpacked extension and refresh the YouTube tab.
-
-## Data and evidence
-
-The API is stateless and suitable for Vercel Functions. The extension stores saved analyses, transcripts, and timestamped notes in extension-local IndexedDB; it does not sync them across devices. Compare sends the selected saved analyses and transcripts to the API only for that request.
-
-`matched` means the quoted words occur near the generated timestamp. `uncertain` means nearby transcript exists but the quote did not match. `unsupported` means no nearby transcript supports it. These labels validate source alignment, not the truth of the overall conclusion. Claim Check separately invokes OpenRouter web search and remains `unchecked` unless source citations are returned.
-
-Visual analysis sends the public YouTube watch URL plus sampled transcript context through OpenRouter. OpenRouter's video input expects decodable media, and a watch-page URL can fail even when the model accepts video. Visual output is therefore not guaranteed by the current integration; Deep Analyze preserves transcript results when it fails. Protect a public deployment with appropriate Vercel rate limits or authentication because every request uses the server-side API key.
+The backend is stateless. Saved videos, transcripts, and notes stay in extension-local IndexedDB on this browser profile. Compare sends selected saved material to the API for that request; cross-device syncing is not implemented.
 
 ## API
 
 - `GET /api/health`
-- `POST /api/videos/analyze` with `url`, optional `transcript_data`, and `mode` (`quick` or `deep`)
-- `POST /api/videos/{video_id}/ask` with `question`, optional `focus_time`, and optional `transcript_data`
+- `POST /api/videos/analyze` with `url`, optional `transcript_data`, `mode`, and optional timestamped `frames` for deep mode
+- `POST /api/videos/{video_id}/ask` with `question`, optional `focus_time` and `transcript_data`
 - `GET /api/videos/{video_id}/transcript`
-- `POST /api/videos/{video_id}/plan` with `goal`, `minutes`, transcript, and optional analysis
-- `POST /api/videos/{video_id}/study` and `/claims` with transcript and optional analysis
-- `POST /api/videos/{video_id}/visual` with optional transcript to add visual analysis
-- `POST /api/claims/check` with `claim`
-- `POST /api/videos/compare` with two to four saved video payloads and an optional question
+- `POST /api/videos/{video_id}/plan`, `/study`, `/claims`, and `/visual`
+- `POST /api/claims/check`
+- `POST /api/videos/compare`
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request flow.
+See [architecture](docs/ARCHITECTURE.md) and [Chrome Web Store privacy notes](docs/CHROME_WEB_STORE.md).

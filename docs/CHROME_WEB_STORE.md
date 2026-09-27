@@ -1,19 +1,15 @@
 # Chrome Web Store Information
 
-## Privacy & Data Usage
+## Privacy and data usage
 
-This extension sends the current public YouTube video URL and, when available, its captions to the backend selected at build time. The backend sends transcript content and temporary public-video stream URLs to OpenRouter for AI analysis. Claim Check can also send an individual claim to OpenRouter's web-search tool. The extension does not collect authentication tokens or unrelated browsing history.
+The extension sends the current public YouTube URL, available captions, and, during deep analysis, sampled player screenshots to the configured backend. The backend sends transcript text, screenshots, and individual claims to Groq for AI analysis or browser-search fact checking. The extension does not collect authentication tokens or unrelated browsing history.
 
-Saved video analyses, transcripts, and notes are kept in Chrome extension-local IndexedDB. They remain on the current browser profile unless the user explicitly invokes a feature that sends them to the configured backend, such as Compare.
+Saved analyses, transcripts, and notes remain in extension-local IndexedDB on the current browser profile. Compare sends selected saved records to the backend only for that request.
 
-### Why permissions are needed
+## Permissions
 
-- `activeTab` and YouTube host permissions: read the active video context, retrieve public captions, follow playback, and seek to user-selected evidence timestamps.
-- `sidePanel`: display the analyzer beside the YouTube player.
-- Backend host permission: call the API selected at extension build time.
+- `activeTab` and YouTube host permissions: inspect the active video, retrieve available captions, follow playback, seek, and capture visible player frames for deep analysis.
+- `sidePanel`: display the analyzer beside YouTube.
+- Backend host permission: call the API selected at build time.
 
-### External Servers
-
-The extension communicates only with YouTube and the configured backend. The backend communicates with YouTube and OpenRouter. No third-party tracking scripts or CDNs are embedded in the extension.
-
-The OpenRouter API key is stored only in the backend environment and is never packaged into or returned to the Chrome extension.
+The extension communicates with YouTube and the configured backend. The backend communicates with YouTube and Groq. The Groq API key stays in the backend environment and is never packaged into the extension.

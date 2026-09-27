@@ -2,7 +2,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.models.schemas import VideoAnalysis
+from app.models.schemas import VideoAnalysis, VideoFrame
 
 
 TranscriptData = list[dict[str, Any]]
@@ -138,3 +138,4 @@ class DeepAnalysis(BaseModel):
 
 class VisualRequest(BaseModel):
     transcript_data: TranscriptData | None = None
+    frames: list[VideoFrame] = Field(min_length=1, max_length=3)
