@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { test } from 'node:test';
 
 test('toolbar click opens the panel through action.onClicked', () => {
   const manifest = JSON.parse(readFileSync(new URL('../dist/manifest.json', import.meta.url)));
   assert.ok(manifest.permissions.includes('activeTab'));
+  assert.ok(manifest.permissions.includes('scripting'));
   assert.equal(manifest.action.default_popup, undefined);
+  assert.ok(existsSync(new URL(`../dist/${manifest.side_panel.default_path}`, import.meta.url)));
 
   let onClicked;
   let panelBehavior;

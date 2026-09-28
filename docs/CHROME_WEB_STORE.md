@@ -9,6 +9,7 @@ Saved analyses, transcripts, and notes remain in extension-local IndexedDB on th
 ## Permissions
 
 - `activeTab` and YouTube host permissions: inspect the active video, retrieve available captions, follow playback, seek, and capture visible player frames for visual analysis.
+- `scripting`: inject the same YouTube content script into an already-open video tab if Chrome has not loaded it yet.
 - `sidePanel`: display the analyzer beside YouTube.
 - Backend host permission: call the API selected at build time.
 

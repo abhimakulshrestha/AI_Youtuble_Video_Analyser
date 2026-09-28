@@ -17,6 +17,20 @@ interface VideoContext {
 
 const modeTabs = { quick: 'overview', deep: 'summary', visual: 'visual' } as const;
 
+async function requestVideoContext(tabId: number): Promise<VideoContext> {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'GET_VIDEO_CONTEXT' });
+    if (response) return response;
+    throw new Error('No content-script response');
+  } catch {
+    // An already-open tab may predate the extension load and lack its content script.
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['assets/content.js'] });
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'GET_VIDEO_CONTEXT' });
+    if (!response) throw new Error('No content-script response after injection');
+    return response;
+  }
+}
+
 function formatTime(seconds: number) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -55,39 +69,36 @@ export default function App() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs: chrome.tabs.Tab[]) => {
       const activeTab = tabs[0];
       if (activeTab && activeTab.id && activeTab.url?.includes('youtube.com/watch')) {
-        chrome.tabs.sendMessage(activeTab.id, { type: 'GET_VIDEO_CONTEXT' }, (response: any) => {
-          if (response) {
-            if (activeVideoId.current !== response.videoId) {
-              setAnalysis(null);
-              setTranscriptData(undefined);
-              setLoading(false);
-              setActiveTab('overview');
-            }
-            activeVideoId.current = response.videoId;
-            setVideoContext(response);
-            setPlayerTime(response.currentTime || 0);
-            setError(null);
-            restoreSavedVideo(response.videoId);
-          } else {
-             // Not loaded yet or injected yet
-             const videoId = activeTab.url ? new URLSearchParams(new URL(activeTab.url).search).get('v') : null;
-             if (activeVideoId.current !== videoId) {
-               setAnalysis(null);
-               setTranscriptData(undefined);
-               setLoading(false);
-               setActiveTab('overview');
-             }
-             activeVideoId.current = videoId;
-             setVideoContext({
-                 url: activeTab.url || '',
-                 title: activeTab.title || 'YouTube Video',
-                 channel: '',
-                 currentTime: 0,
-                 duration: 0,
-                 videoId
-             });
-             restoreSavedVideo(videoId);
+        void requestVideoContext(activeTab.id).then((response: VideoContext) => {
+          if (activeVideoId.current !== response.videoId) {
+            setAnalysis(null);
+            setTranscriptData(undefined);
+            setLoading(false);
+            setActiveTab('overview');
           }
+          activeVideoId.current = response.videoId;
+          setVideoContext(response);
+          setPlayerTime(response.currentTime || 0);
+          setError(null);
+          restoreSavedVideo(response.videoId);
+        }).catch(() => {
+          const videoId = activeTab.url ? new URLSearchParams(new URL(activeTab.url).search).get('v') : null;
+          if (activeVideoId.current !== videoId) {
+            setAnalysis(null);
+            setTranscriptData(undefined);
+            setLoading(false);
+            setActiveTab('overview');
+          }
+          activeVideoId.current = videoId;
+          setVideoContext({
+            url: activeTab.url || '',
+            title: activeTab.title || 'YouTube Video',
+            channel: '',
+            currentTime: 0,
+            duration: 0,
+            videoId
+          });
+          restoreSavedVideo(videoId);
         });
       } else {
         activeVideoId.current = null;
@@ -154,7 +165,7 @@ export default function App() {
       if (!transcript_data && videoId) {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         if (tabs[0]?.id) {
-          const fresh = await chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_VIDEO_CONTEXT' }).catch(() => null);
+          const fresh = await requestVideoContext(tabs[0].id).catch(() => null);
           if (fresh?.videoId === videoId) transcript_data = fresh.transcript_data;
         }
       }

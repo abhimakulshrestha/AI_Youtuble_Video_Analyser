@@ -5,7 +5,8 @@
   "description": "Analyze YouTube videos with Groq Qwen.",
   "permissions": [
     "sidePanel",
-    "activeTab"
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
     "https://*.youtube.com/*",
@@ -20,7 +21,7 @@
     "default_title": "Open Analyzer"
   },
   "side_panel": {
-    "default_path": "index.html"
+    "default_path": "sidepanel.html"
   },
   "content_scripts": [
     {

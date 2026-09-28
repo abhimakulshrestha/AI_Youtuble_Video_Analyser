@@ -3,10 +3,104 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>YouTube AI Analyzer</title>
+    <title>YouTube AI Analyzer | Guide</title>
+    <style>
+      :root { color-scheme: light; font-family: Arial, Helvetica, sans-serif; color: #17222b; background: #f7f9fa; }
+      * { box-sizing: border-box; }
+      body { margin: 0; line-height: 1.55; }
+      a { color: #086b71; }
+      a:focus-visible { outline: 3px solid #086b71; outline-offset: 3px; }
+      header { background: #fff; border-bottom: 1px solid #dce3e5; }
+      .bar, main, footer { max-width: 920px; margin: auto; padding-left: 24px; padding-right: 24px; }
+      .bar { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+      .brand { font-weight: 700; color: #17222b; text-decoration: none; }
+      .brand-mark { display: inline-block; padding: 2px 7px; margin-right: 8px; border-radius: 4px; background: #e92338; color: #fff; }
+      nav { display: flex; gap: 20px; font-size: 14px; }
+      nav a { text-decoration: none; white-space: nowrap; }
+      main { padding-top: 52px; padding-bottom: 64px; }
+      .eyebrow { margin: 0 0 10px; color: #086b71; font-size: 13px; font-weight: 700; text-transform: uppercase; }
+      h1 { font-size: 44px; line-height: 1.12; margin: 0 0 16px; }
+      h2 { font-size: 23px; line-height: 1.25; margin: 0 0 16px; }
+      h3 { font-size: 16px; margin: 0 0 4px; }
+      p { margin: 0 0 14px; }
+      .intro { max-width: 690px; font-size: 18px; color: #46545d; }
+      .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0 0; }
+      .button { display: inline-block; padding: 11px 17px; border-radius: 5px; background: #086b71; color: #fff; font-weight: 700; text-decoration: none; }
+      .button:hover { background: #07575b; }
+      .text-link { padding: 11px 0; font-weight: 700; }
+      section { padding-top: 34px; margin-top: 34px; border-top: 1px solid #dce3e5; }
+      .features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 36px; }
+      .features p, .note { color: #46545d; }
+      ol { margin: 0; padding-left: 22px; }
+      li { padding-left: 5px; margin: 0 0 13px; }
+      code { padding: 2px 5px; border-radius: 3px; background: #e8eff0; font-size: .94em; overflow-wrap: anywhere; }
+      footer { padding-top: 22px; padding-bottom: 30px; border-top: 1px solid #dce3e5; color: #64727a; font-size: 13px; }
+      @media (max-width: 620px) {
+        .bar { flex-wrap: wrap; padding-top: 15px; padding-bottom: 15px; }
+        main { padding-top: 34px; }
+        h1 { font-size: 32px; }
+        .features { grid-template-columns: 1fr; gap: 15px; }
+        nav { gap: 14px; }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <header>
+      <div class="bar">
+        <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">&#9654;</span>YouTube AI Analyzer</a>
+        <nav aria-label="On this page">
+          <a href="#features">Features</a>
+          <a href="#how-it-works">How it works</a>
+          <a href="#install">Install</a>
+        </nav>
+      </div>
+    </header>
+    <main id="top">
+      <p class="eyebrow">Chrome extension guide</p>
+      <h1>YouTube AI Analyzer</h1>
+      <p class="intro">A side panel for turning YouTube videos into useful notes, answers, watch plans, and study material with links back to the moments that matter.</p>
+      <div class="actions">
+        <a class="button" href="./youtube-ai-analyzer-production.zip" download>Download tester build</a>
+        <a class="text-link" href="#install">Installation steps</a>
+      </div>
+
+      <section id="features" aria-labelledby="features-title">
+        <h2 id="features-title">What it can do</h2>
+        <div class="features">
+          <div><h3>Analyze at your depth</h3><p>Switch between quick, deep, and visual analysis. Visual analysis checks a few sampled frames for information the narration may miss.</p></div>
+          <div><h3>Watch with context</h3><p>Create a goal-based watch plan, follow the current topic as the video plays, and ask questions about a specific moment.</p></div>
+          <div><h3>Trace the evidence</h3><p>Jump to supporting timestamps, see uncertainty labels, and check selected factual claims against outside sources.</p></div>
+          <div><h3>Keep learning</h3><p>Save insights in a local library, compare saved videos, and review quizzes and flashcards linked to their source clips.</p></div>
+        </div>
+      </section>
+
+      <section id="how-it-works" aria-labelledby="how-title">
+        <h2 id="how-title">How it works</h2>
+        <ol>
+          <li>Open a YouTube video and click the extension icon to open its side panel.</li>
+          <li>The extension reads available captions. Choose Quick Analyze or Deep Analyze to generate the first result.</li>
+          <li>For Analyze visuals, keep the video tab open while the extension samples three frames. It restores your playback position afterward.</li>
+          <li>Explore timestamped insights, ask questions, or save useful material. Saved items stay in this browser profile.</li>
+        </ol>
+        <p class="note">Analysis needs a transcript. Long videos may use evenly spaced excerpts, and visual analysis does not inspect every frame. AI-generated answers and outside claim checks can be incomplete, so use the linked evidence to verify important points.</p>
+      </section>
+
+      <section id="install" aria-labelledby="install-title">
+        <h2 id="install-title">Install the tester build</h2>
+        <ol>
+          <li>Download the ZIP above and extract it to a folder. The extracted folder must contain <code>manifest.json</code>.</li>
+          <li>In Chrome, type <code>chrome://extensions</code> in the address bar and turn on <strong>Developer mode</strong>.</li>
+          <li>Click <strong>Load unpacked</strong> and select the extracted folder, not the ZIP file.</li>
+          <li>Open or refresh a YouTube watch page, then click the YouTube AI Analyzer extension icon. Pin it from Chrome's Extensions menu for easier access.</li>
+        </ol>
+        <p class="note">This is a tester installation, not a Chrome Web Store listing. To update it, replace the extracted files with a new build, click Reload on <code>chrome://extensions</code>, and refresh your YouTube tab.</p>
+      </section>
+
+      <section aria-labelledby="privacy-title">
+        <h2 id="privacy-title">Data and availability</h2>
+        <p class="note">Video captions, selected screenshots, and questions are sent to the hosted analyzer when needed. Saved notes and videos stay in this browser profile; they do not sync across devices. The hosted API must be available for analysis to work.</p>
+      </section>
+    </main>
+    <footer>YouTube AI Analyzer is an independent tool and is not affiliated with YouTube.</footer>
   </body>
 </html>

@@ -41,24 +41,25 @@ async function fetchTranscriptFromDOM(): Promise<{ text: string; start: number; 
     const button = document.querySelector<HTMLButtonElement>('ytd-video-description-transcript-section-renderer button[aria-label="Show transcript"]');
     if (!button) return null;
     button.click();
-    const ready = () => {
-      const current = document.querySelector(selector);
-      return current?.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' && !!current.querySelector('transcript-segment-view-model');
-    };
-    if (!ready()) {
-      await new Promise<void>(resolve => {
-        const timer = window.setTimeout(() => { observer.disconnect(); resolve(); }, 8000);
-        const observer = new MutationObserver(() => {
-          if (!ready()) return;
-          window.clearTimeout(timer);
-          observer.disconnect();
-          resolve();
-        });
-        observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['visibility'] });
-      });
-    }
-    panel = document.querySelector(selector);
   }
+
+  const ready = () => {
+    const current = document.querySelector(selector);
+    return current?.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' && !!current.querySelector('transcript-segment-view-model');
+  };
+  if (!ready()) {
+    await new Promise<void>(resolve => {
+      const timer = window.setTimeout(() => { observer.disconnect(); resolve(); }, 8000);
+      const observer = new MutationObserver(() => {
+        if (!ready()) return;
+        window.clearTimeout(timer);
+        observer.disconnect();
+        resolve();
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['visibility'] });
+    });
+  }
+  panel = document.querySelector(selector);
 
   try {
     if (new URLSearchParams(location.search).get('v') !== videoId || panel?.getAttribute('visibility') !== 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED') return null;
@@ -97,7 +98,7 @@ chrome.runtime.onMessage.addListener((message: any, _sender: chrome.runtime.Mess
   if (message.type === 'GET_VIDEO_CONTEXT') {
     (async () => {
        const context = extractVideoContext();
-       const transcript = await fetchTranscriptFromDOM();
+       const transcript = await fetchTranscriptFromDOM().catch(() => null);
        sendResponse({ ...context, transcript_data: transcript });
     })();
     return true;

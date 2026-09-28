@@ -27,7 +27,7 @@ export default defineConfig(({ mode }) => ({
   build: {
     rollupOptions: {
       input: {
-        sidepanel: resolve(projectDir, 'index.html'),
+        sidepanel: resolve(projectDir, 'sidepanel.html'),
         background: resolve(projectDir, 'src/background.ts'),
         content: resolve(projectDir, 'src/content/youtube-content.ts')
       },
