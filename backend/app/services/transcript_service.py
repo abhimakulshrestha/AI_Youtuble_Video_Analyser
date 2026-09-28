@@ -1,6 +1,27 @@
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from typing import List, Dict, Any
 import hashlib
+import json
+
+
+def sample_transcript(transcript: List[Dict[str, Any]], max_chars: int = 12000) -> tuple[List[Dict[str, Any]], bool]:
+    context = [
+        {"start": item["start"], "end": item["start"] + item.get("duration", 0), "text": item["text"]}
+        for item in transcript if item.get("text", "").strip()
+    ]
+    if not context:
+        raise ValueError("No usable transcript segments provided.")
+    sampled = len(json.dumps(context, ensure_ascii=False)) > max_chars
+    if sampled:
+        original = context
+        count = min(len(original), 200)
+        while True:
+            indices = (round(index * (len(original) - 1) / max(1, count - 1)) for index in range(count))
+            context = [{**original[index], "text": original[index]["text"][:200]} for index in indices]
+            if len(json.dumps(context, ensure_ascii=False)) <= max_chars or count == 1:
+                break
+            count = max(1, int(count * 0.8))
+    return context, sampled
 
 class TranscriptService:
     @staticmethod

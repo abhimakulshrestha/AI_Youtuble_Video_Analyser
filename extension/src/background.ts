@@ -1,7 +1,10 @@
-// Allow side panel to open on action click
-chrome.sidePanel
-  .setPanelBehavior({ openPanelOnActionClick: true })
-  .catch((error: any) => console.error(error));
+void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(console.error);
+
+chrome.action.onClicked.addListener((tab) => {
+  if (tab.id !== undefined) {
+    void chrome.sidePanel.open({ tabId: tab.id }).catch(console.error);
+  }
+});
 
 chrome.tabs.onUpdated.addListener((tabId: number, info: any, tab: chrome.tabs.Tab) => {
   if (info.url && tab.url?.includes('youtube.com/watch')) {

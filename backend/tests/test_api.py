@@ -124,6 +124,23 @@ def test_analyze_ask_and_cors(monkeypatch):
     assert answer.json()["answer"] == "They use sunlight."
 
 
+def test_long_video_question_keeps_groq_context_bounded(monkeypatch):
+    monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
+
+    class MeasuringLLM(FakeLLM):
+        async def answer_question(self, question, chunks):
+            assert sum(len(chunk["text"]) for chunk in chunks) < 16000
+            return {"answer": "The context is bounded.", "citations": []}
+
+    monkeypatch.setattr(endpoints, "LLMService", MeasuringLLM)
+    transcript = [{"text": "Solar panels turn sunlight into electricity. " * 3, "start": i * 5, "duration": 5} for i in range(400)]
+    response = TestClient(app).post(
+        f"/api/videos/{VIDEO_ID}/ask",
+        json={"question": "How do solar panels work?", "focus_time": 1000, "transcript_data": transcript},
+    )
+    assert response.status_code == 200, response.text
+
+
 def test_missing_transcript_is_client_error(monkeypatch):
     monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
     monkeypatch.setattr(endpoints.TranscriptService, "fetch_transcript", lambda *_: [])
@@ -200,6 +217,37 @@ def test_long_transcript_is_sampled_across_video():
     assert excerpts[-1]["start"] == 3594
 
 
+def test_feature_context_preserves_segment_timestamps():
+    context = endpoints.short_context(TRANSCRIPT)
+    assert [item["start"] for item in context["transcript"]] == [0, 5]
+    long_context = endpoints.short_context([
+        {"text": "Detailed line " * 8, "start": i * 6, "duration": 6} for i in range(600)
+    ])
+    assert len(json.dumps(long_context["transcript"])) <= 10000
+    assert long_context["transcript"][0]["start"] == 0
+    assert long_context["transcript"][-1]["start"] == 3594
+
+
+def test_watch_plan_gets_contiguous_windows(monkeypatch):
+    monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
+
+    class MeasuringLLM:
+        async def generate_json(self, instruction, payload):
+            windows = payload["transcript"]
+            assert windows[0]["end"] - windows[0]["start"] >= 20
+            assert len(json.dumps(windows)) < 10000
+            return {"clips": [{"title": "Solar steps", "reason": "Practical guidance", "start": windows[0]["start"], "end": windows[0]["end"]}]}
+
+    monkeypatch.setattr(endpoints, "LLMService", MeasuringLLM)
+    transcript = [{"text": "Inspect the roof and install the solar panel. " * 2, "start": i * 5, "duration": 5} for i in range(400)]
+    response = TestClient(app).post(
+        f"/api/videos/{VIDEO_ID}/plan",
+        json={"goal": "Practical solar steps", "minutes": 3, "transcript_data": transcript},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["clips"][0]["end"] - response.json()["clips"][0]["start"] >= 20
+
+
 def test_text_analysis_falls_back_from_gpt_oss_to_qwen():
     calls = []
 
@@ -219,6 +267,21 @@ def test_text_analysis_falls_back_from_gpt_oss_to_qwen():
         {"start": 0.0, "duration": 5.0, "text": "Transcript text"}
     ]))
     assert analysis.executive_summary == "Fallback summary"
+    assert calls == [llm_service.settings.GROQ_MODEL, llm_service.settings.GROQ_FALLBACK_MODEL]
+
+
+def test_invalid_groq_json_falls_back_to_qwen():
+    calls = []
+
+    class Client:
+        async def chat(self, messages, **kwargs):
+            calls.append(kwargs["model"])
+            if len(calls) == 1:
+                raise llm_service.GroqError(400, "Failed to validate JSON. Please adjust your prompt.")
+            return {"choices": [{"message": {"content": '{"answer":"Grounded answer","citations":[]}'}}]}
+
+    result = asyncio.run(llm_service.LLMService(Client()).answer_question("What happened?", []))
+    assert result["answer"] == "Grounded answer"
     assert calls == [llm_service.settings.GROQ_MODEL, llm_service.settings.GROQ_FALLBACK_MODEL]
 
 

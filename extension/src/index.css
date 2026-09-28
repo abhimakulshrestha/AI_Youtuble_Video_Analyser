@@ -56,7 +56,13 @@ h1, h2, h3, h4 {
   background-color: var(--bg-color);
 }
 
-.header-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.analysis-controls { display: flex; align-items: center; gap: 8px; }
+.analysis-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); flex: 1; min-width: 0; border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; }
+.analysis-mode { min-width: 0; height: 34px; padding: 0 4px; border: 0; border-right: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color); font: inherit; font-weight: 500; cursor: pointer; }
+.analysis-mode:last-child { border-right: 0; }
+.analysis-mode:hover { background: var(--hover-color); }
+.analysis-mode.active { background: var(--secondary-color); color: var(--primary-color); font-weight: 700; }
+.analysis-mode:disabled { opacity: .5; cursor: default; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: none; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-color); color: var(--text-color); cursor: pointer; }
 .icon-button:hover { background: var(--hover-color); }
 .icon-button:disabled { opacity: .5; cursor: default; }
@@ -78,12 +84,6 @@ h1, h2, h3, h4 {
 
 @media (prefers-color-scheme: dark) {
   .video-channel { color: #aaaaaa; }
-}
-
-.button-group {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
 }
 
 .btn {
@@ -263,6 +263,7 @@ h1, h2, h3, h4 {
 .field-label input, .text-field { box-sizing: border-box; min-width: 0; width: 100%; padding: 9px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-color); color: var(--text-color); font: inherit; }
 .feature-row .text-field { flex: 1; }
 .feature-error, .incorrect { color: var(--error-color); }
+.coverage-notice { color: var(--text-color); opacity: .75; border-left: 2px solid var(--border-color); padding-left: 8px; }
 .correct { color: #237346; }
 .option-list { display: grid; gap: 6px; }
 .option { text-align: left; padding: 8px 10px; background: var(--bg-color); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; font: inherit; }

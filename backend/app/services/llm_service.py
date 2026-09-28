@@ -4,6 +4,7 @@ from typing import Any
 from app.config import settings
 from app.models.schemas import VideoAnalysis
 from app.services.groq_client import GroqClient, GroqError, first_message, message_text
+from app.services.transcript_service import sample_transcript
 
 
 def parse_json_object(content: str) -> dict[str, Any]:
@@ -43,7 +44,7 @@ class LLMService:
             except GroqError as exc:
                 last_error = exc
                 retryable = exc.status_code in {404, 408, 409, 429} or exc.status_code >= 500 or (
-                    exc.status_code == 400 and "Failed to generate JSON" in str(exc)
+                    exc.status_code == 400 and any(message in str(exc) for message in ("Failed to generate JSON", "Failed to validate JSON"))
                 )
                 if not retryable or index == len(models) - 1:
                     raise
@@ -56,22 +57,7 @@ class LLMService:
     async def generate_full_analysis(self, transcript: list[dict[str, Any]]) -> tuple[VideoAnalysis, bool]:
         if not transcript:
             raise ValueError("No transcript segments provided.")
-        context = [
-            {"start": item["start"], "end": item["start"] + item.get("duration", 0), "text": item["text"]}
-            for item in transcript if item.get("text", "").strip()
-        ]
-        if not context:
-            raise ValueError("No usable transcript segments provided.")
-        sampled = len(json.dumps(context, ensure_ascii=False)) > 12000
-        if sampled:
-            original = context
-            count = min(len(original), 200)
-            while True:
-                indices = (round(index * (len(original) - 1) / max(1, count - 1)) for index in range(count))
-                context = [{**original[index], "text": original[index]["text"][:200]} for index in indices]
-                if len(json.dumps(context, ensure_ascii=False)) <= 12000 or count == 1:
-                    break
-                count = max(1, int(count * 0.8))
+        context, sampled = sample_transcript(transcript)
         data = await self.generate_json(
             """Analyze only the supplied transcript excerpts; do not imply unsampled moments were reviewed. Use this exact schema:
             {"executive_summary":string,"detailed_summary":string,"content_type":string|null,

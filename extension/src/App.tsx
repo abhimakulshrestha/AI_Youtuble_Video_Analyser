@@ -15,6 +15,8 @@ interface VideoContext {
   transcript_data?: TranscriptSegment[];
 }
 
+const modeTabs = { quick: 'overview', deep: 'summary', visual: 'visual' } as const;
+
 function formatTime(seconds: number) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -59,6 +61,7 @@ export default function App() {
               setAnalysis(null);
               setTranscriptData(undefined);
               setLoading(false);
+              setActiveTab('overview');
             }
             activeVideoId.current = response.videoId;
             setVideoContext(response);
@@ -72,6 +75,7 @@ export default function App() {
                setAnalysis(null);
                setTranscriptData(undefined);
                setLoading(false);
+               setActiveTab('overview');
              }
              activeVideoId.current = videoId;
              setVideoContext({
@@ -91,6 +95,7 @@ export default function App() {
         setAnalysis(null);
         setTranscriptData(undefined);
         setLoading(false);
+        setActiveTab('overview');
         setError("Please open a YouTube video to use the Analyzer.");
       }
     });
@@ -106,6 +111,7 @@ export default function App() {
         setAnalysis(null); // Reset analysis on new video
         setTranscriptData(undefined);
         setLoading(false);
+        setActiveTab('overview');
         fetchContext();
       }
     };
@@ -133,8 +139,13 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [videoContext?.videoId]);
 
-  const handleAnalyze = async (mode: 'quick' | 'deep') => {
+  const handleAnalyze = async (mode: 'quick' | 'deep' | 'visual') => {
     if (!videoContext?.url) return;
+    const targetTab = modeTabs[mode];
+    if (analysis && (mode !== 'visual' || analysis.deep_analysis)) {
+      setActiveTab(targetTab);
+      return;
+    }
     const videoId = videoContext.videoId;
     setLoading(true);
     setError(null);
@@ -162,7 +173,12 @@ export default function App() {
             const frame = await chrome.tabs.sendMessage(tabId, { type: 'CAPTURE_FRAME', videoId, time });
             if (frame?.error || !frame?.rect?.width || !frame?.rect?.height) throw new Error(frame?.error || 'The video is outside the visible tab.');
             await new Promise(resolve => setTimeout(resolve, Math.max(0, 550 - (Date.now() - lastCapture))));
-            const screenshot = await chrome.tabs.captureVisibleTab(tabs[0].windowId, { format: 'jpeg', quality: 70 });
+            const screenshot = await chrome.tabs.captureVisibleTab(tabs[0].windowId, { format: 'jpeg', quality: 70 }).catch(error => {
+              if (String(error).includes("'activeTab' permission is required")) {
+                throw new Error('Click the analyzer extension icon on this YouTube tab, then retry Analyze visuals.');
+              }
+              throw error;
+            });
             lastCapture = Date.now();
             const image = new Image();
             image.src = screenshot;
@@ -196,26 +212,21 @@ export default function App() {
         }
         return frames;
       };
-      if (mode === 'deep' && analysis && videoContext.videoId) {
-        const frames = await captureVisualFrames();
-        const deep_analysis = await api.visual(videoContext.videoId, transcriptData || analysis.transcript_data || [], frames);
-        if (activeVideoId.current !== videoId) return;
-        setAnalysis({ ...analysis, deep_analysis });
-        setActiveTab('timeline');
-        return;
-      }
-      let frames: VideoFrame[] | undefined;
-      let captureError: string | undefined;
-      if (mode === 'deep') {
-        try { frames = await captureVisualFrames(); }
-        catch (error) { captureError = error instanceof Error ? error.message : String(error); }
-      }
-      const result = await api.analyzeVideo(videoContext.url, transcript_data, mode, frames);
+      const result = analysis || await api.analyzeVideo(videoContext.url, transcript_data, 'quick');
       if (activeVideoId.current !== videoId) return;
-      setTranscriptData(result.transcript_data || transcript_data);
-      setAnalysis(result);
-      if (captureError) setError(`Visual capture unavailable: ${captureError}`);
-      setActiveTab('summary');
+      if (!analysis) {
+        setTranscriptData(result.transcript_data || transcript_data);
+        setAnalysis(result);
+        setActiveTab(mode === 'visual' ? 'overview' : targetTab);
+      }
+      if (mode === 'visual') {
+        if (!videoId) throw new Error('Video ID unavailable for visual analysis.');
+        const frames = await captureVisualFrames();
+        const deep_analysis = await api.visual(videoId, transcriptData || result.transcript_data || transcript_data || [], frames);
+        if (activeVideoId.current !== videoId) return;
+        setAnalysis({ ...result, deep_analysis });
+      }
+      setActiveTab(targetTab);
     } catch (err: any) {
       if (activeVideoId.current === videoId) setError(err.message || 'Failed to analyze video');
     } finally {
@@ -257,21 +268,27 @@ export default function App() {
           <div className="video-title">{videoContext?.title}</div>
           <div className="video-channel">{videoContext?.channel}</div>
         </div>
-        {analysis && videoContext?.videoId && (
-          <div className="header-actions">
-            {!analysis.deep_analysis && <button className="btn btn-secondary" disabled={loading} onClick={() => void handleAnalyze('deep')}>Analyze visuals</button>}
+        <div className="analysis-controls">
+          <div className="analysis-modes" role="group" aria-label="Analysis views">
+            {(['quick', 'deep', 'visual'] as const).map(mode => (
+              <button
+                key={mode}
+                type="button"
+                className={`analysis-mode ${analysis && activeTab === modeTabs[mode] ? 'active' : ''}`}
+                aria-pressed={!!analysis && activeTab === modeTabs[mode]}
+                disabled={loading}
+                onClick={() => void handleAnalyze(mode)}
+              >
+                {mode.charAt(0).toUpperCase() + mode.slice(1)}
+              </button>
+            ))}
+          </div>
+          {analysis && videoContext?.videoId && (
             <button className="icon-button" title="Save video to library" aria-label="Save video to library" onClick={() => void saveCurrent()}>
               {savedVideos.some(item => item.videoId === videoContext.videoId) ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
             </button>
-          </div>
-        )}
-        
-        {!analysis && !loading && (
-          <div className="button-group">
-            <button className="btn btn-primary" onClick={() => void handleAnalyze('quick')}>Quick Analyze</button>
-            <button className="btn btn-secondary" onClick={() => void handleAnalyze('deep')}>Deep Analyze</button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {error && <div style={{padding: 16, color: 'var(--error-color)'}}>{error}</div>}
@@ -285,7 +302,7 @@ export default function App() {
       {viewAnalysis && !loading && (
         <>
           <div className="tabs">
-            {(analysis ? ['overview', 'summary', 'chapters', 'topics', 'timeline', 'plan', 'live', 'claims', 'study', 'library', 'compare', 'ask ai'] : ['library', 'compare']).map(tab => (
+            {(analysis ? ['chapters', 'topics', 'timeline', 'plan', 'live', 'claims', 'study', 'library', 'compare', 'ask ai'] : ['library', 'compare']).map(tab => (
               <button
                 type="button"
                 key={tab} 
@@ -300,7 +317,7 @@ export default function App() {
           <div className="content-area">
             {analysis && visibleTab === 'overview' && (
               <div>
-                {analysis.feature_warnings?.map((warning, index) => <p className="feature-error" key={index}>{warning}</p>)}
+                {analysis.feature_warnings?.map((warning, index) => <p className={warning.startsWith('Long video:') ? 'coverage-notice' : 'feature-error'} key={index}>{warning}</p>)}
                 <h3>Executive Summary</h3>
                 <p>{analysis.executive_summary}</p>
                 {analysis.content_type && <p><strong>Type:</strong> {analysis.content_type}</p>}
@@ -314,15 +331,9 @@ export default function App() {
 
             {analysis && visibleTab === 'summary' && (
               <div>
-                {analysis.feature_warnings?.map((warning, index) => <p className="feature-error" key={index}>{warning}</p>)}
+                {analysis.feature_warnings?.map((warning, index) => <p className={warning.startsWith('Long video:') ? 'coverage-notice' : 'feature-error'} key={index}>{warning}</p>)}
                 <h3>Detailed Summary</h3>
                 <ReactMarkdown>{analysis.detailed_summary}</ReactMarkdown>
-                {analysis.deep_analysis?.visual_summary && (
-                  <>
-                    <h3>Visual Analysis</h3>
-                    <ReactMarkdown>{analysis.deep_analysis.visual_summary}</ReactMarkdown>
-                  </>
-                )}
                 
                 <h3>Key Points</h3>
                 {analysis.key_points.map((kp, i) => (
@@ -340,6 +351,34 @@ export default function App() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {analysis && visibleTab === 'visual' && (
+              <div>
+                <h3>Visual Analysis</h3>
+                {analysis.deep_analysis ? (
+                  <>
+                    <ReactMarkdown>{analysis.deep_analysis.visual_summary}</ReactMarkdown>
+                    <h3>Visual Moments</h3>
+                    {analysis.deep_analysis.visual_events.map((event, index) => (
+                      <article className="feature-item" key={index}>
+                        <button className="timestamp" onClick={() => handleSeek(event.start)}>{formatTime(event.start)}</button>
+                        <h4>{event.kind}</h4>
+                        <p>{event.description}</p>
+                      </article>
+                    ))}
+                    <h3>What the speaker missed</h3>
+                    {analysis.deep_analysis.visual_gaps.map((gap, index) => (
+                      <article className="feature-item" key={index}>
+                        <button className="timestamp" onClick={() => handleSeek(gap.start)}>{formatTime(gap.start)}</button>
+                        <h4>{gap.visual_detail}</h4>
+                        <p>Spoken: {gap.spoken_context}</p>
+                        <p>{gap.why_it_matters}</p>
+                      </article>
+                    ))}
+                  </>
+                ) : <p>Select Visual to analyze the video frames.</p>}
               </div>
             )}
 

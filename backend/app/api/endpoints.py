@@ -13,7 +13,7 @@ from app.services.evidence import bound_start, check_analysis, check_excerpt, vi
 from app.services.llm_service import LLMService
 from app.services.multimodal_service import MultimodalService
 from app.services.groq_client import GroqError
-from app.services.transcript_service import TranscriptService
+from app.services.transcript_service import TranscriptService, sample_transcript
 from app.utils.youtube import extract_video_id, is_valid_youtube_id
 
 router = APIRouter()
@@ -108,7 +108,7 @@ async def ask_question(video_id: str, request: ChatRequest):
     require_groq()
 
     transcript = get_transcript_data(video_id, "en", request.transcript_data)
-    chunks = TranscriptService.chunk_transcript(transcript)
+    chunks = TranscriptService.chunk_transcript(transcript, max_tokens=300, overlap_tokens=40)
     if not chunks:
         raise HTTPException(status_code=400, detail="No usable transcript segments were found.")
     selected = select_relevant_chunks(chunks, f"{request.question} {request.context_hints or ''}")
@@ -145,11 +145,10 @@ def require_groq() -> None:
 
 
 def short_context(transcript: list[dict], analysis=None) -> dict:
-    chunks = TranscriptService.chunk_transcript(transcript)
-    sampled = chunks if len(chunks) <= 12 else [chunks[round(index * (len(chunks) - 1) / 11)] for index in range(12)]
+    sampled, _ = sample_transcript(transcript, max_chars=10000)
     return {
         "analysis": {"summary": analysis.executive_summary[:1600], "key_points": [point.model_dump() for point in analysis.key_points[:12]], "chapters": [chapter.model_dump() for chapter in analysis.chapters[:20]]} if analysis else None,
-        "transcript": [{"start": c["start_time"], "end": c["end_time"], "text": c["text"][:1000]} for c in sampled],
+        "transcript": sampled,
         "duration": video_end(transcript),
     }
 
@@ -159,9 +158,15 @@ async def create_plan(video_id: str, request: PlanRequest):
     require_video(video_id)
     transcript = get_transcript_data(video_id, "en", request.transcript_data)
     try:
+        context = short_context(transcript, request.analysis)
+        chunks = TranscriptService.chunk_transcript(transcript, max_tokens=250, overlap_tokens=0)
+        context["transcript"] = [
+            {"start": chunk["start_time"], "end": chunk["end_time"], "text": chunk["text"][:1400]}
+            for chunk in select_relevant_chunks(chunks, request.goal, k=6)
+        ]
         data = await LLMService().generate_json(
-            "Build a goal-based watch plan. Return {clips:[{title,reason,start,end}]}. Use only transcript timestamps, choose useful nonoverlapping clips in chronological order, and fit the supplied time budget. Explain the contribution of each clip. Prefer actual steps for a practical goal.",
-            {"goal": request.goal, "budget_seconds": request.minutes * 60, **short_context(transcript, request.analysis)},
+            "Build a goal-based watch plan. Return {clips:[{title,reason,start,end}]}. Choose useful nonoverlapping clips in chronological order that fit the time budget. Each clip must stay within a supplied transcript window; prefer 20-90 second moments over isolated utterances when the source allows it. Explain the contribution of each clip. Prefer actual steps for a practical goal.",
+            {"goal": request.goal, "budget_seconds": request.minutes * 60, **context},
         )
         clips = []
         remaining = request.minutes * 60
