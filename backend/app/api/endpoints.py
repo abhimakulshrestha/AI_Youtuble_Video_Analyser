@@ -78,14 +78,6 @@ async def analyze_video(request: AnalyzeRequest):
         result["evidence_checks"] = [check.model_dump() for check in check_analysis(analysis, transcript)]
         if sampled:
             result["feature_warnings"] = ["Long video: analysis uses evenly spaced transcript excerpts, so some details may be missed."]
-        if request.mode == "deep":
-            if request.frames:
-                try:
-                    result["deep_analysis"] = await MultimodalService().analyze_frames(request.frames, transcript)
-                except (GroqError, ValueError) as exc:
-                    result.setdefault("feature_warnings", []).append(f"Visual analysis unavailable: {exc}")
-            else:
-                result.setdefault("feature_warnings", []).append("Visual analysis needs frames captured from the YouTube player.")
         return result
     except Exception as exc:
         raise upstream_failure("Analysis failed", exc) from exc
@@ -124,13 +116,6 @@ async def ask_question(video_id: str, request: ChatRequest):
         return ChatResponse(**result)
     except Exception as exc:
         raise upstream_failure("Failed to generate answer", exc) from exc
-
-
-@router.get("/videos/{video_id}/transcript")
-def get_transcript(video_id: str, language: str = "en"):
-    if not is_valid_youtube_id(video_id):
-        raise HTTPException(status_code=400, detail="Invalid video ID")
-    return {"transcript": get_transcript_data(video_id, language, None)}
 
 
 def require_video(video_id: str) -> None:

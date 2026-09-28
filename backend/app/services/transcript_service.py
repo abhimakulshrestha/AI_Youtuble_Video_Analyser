@@ -1,6 +1,5 @@
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from typing import List, Dict, Any
-import hashlib
 import json
 
 
@@ -57,22 +56,12 @@ class TranscriptService:
             raise RuntimeError("YouTube did not provide captions to the server. Reload the extension and YouTube tab, then retry.") from exc
 
     @staticmethod
-    def get_transcript_hash(transcript_data: List[Dict[str, Any]]) -> str:
-        """
-        Returns a deterministic hash of the transcript data.
-        """
-        text_content = "".join([t.get("text", "") for t in transcript_data])
-        return hashlib.sha256(text_content.encode('utf-8')).hexdigest()
-
-    @staticmethod
     def chunk_transcript(transcript_data: List[Dict[str, Any]], 
                          max_tokens: int = 1200, 
                          overlap_tokens: int = 200) -> List[Dict[str, Any]]:
         """
         Chunks the transcript while preserving timestamp boundaries.
-        Uses a simplistic character count estimation for tokens (approx 4 chars/token) 
-        if tiktoken is too slow, but here we can just use word boundaries or characters
-        for simplicity, ensuring we don't break individual transcript lines.
+        Uses an approximate four-character token budget without splitting segments.
         """
         # A simple token approximation: 1 token ~= 4 characters
         max_chars = max_tokens * 4

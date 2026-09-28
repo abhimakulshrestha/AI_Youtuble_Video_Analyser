@@ -16,7 +16,6 @@ TRANSCRIPT = [
     {"text": "A useful explanation of solar power.", "start": 0.0, "duration": 5.0},
     {"text": "Solar panels turn sunlight into electricity.", "start": 5.0, "duration": 5.0},
 ]
-FRAME = {"start": 2.0, "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlX8AAAAASUVORK5CYII="}
 
 
 def test_groq_client_uses_qwen_json_mode(monkeypatch):
@@ -79,7 +78,6 @@ def test_transcript_api_objects_are_normalized(monkeypatch):
     monkeypatch.setattr(transcript_service, "YouTubeTranscriptApi", API)
     result = transcript_service.TranscriptService.fetch_transcript(VIDEO_ID)
     assert result == TRANSCRIPT
-    assert transcript_service.TranscriptService.get_transcript_hash(result)
     assert transcript_service.TranscriptService.chunk_transcript(result)[0]["start_time"] == 0
 
 
@@ -283,44 +281,6 @@ def test_invalid_groq_json_falls_back_to_qwen():
     result = asyncio.run(llm_service.LLMService(Client()).answer_question("What happened?", []))
     assert result["answer"] == "Grounded answer"
     assert calls == [llm_service.settings.GROQ_MODEL, llm_service.settings.GROQ_FALLBACK_MODEL]
-
-
-def test_deep_analysis_is_returned(monkeypatch):
-    monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
-    monkeypatch.setattr(endpoints, "LLMService", FakeLLM)
-
-    class FakeMultimodal:
-        async def analyze_frames(self, frames, transcript):
-            assert frames[0].start == 2.0
-            assert transcript == TRANSCRIPT
-            return {"visual_summary": "A diagram appears.", "visual_events": [], "visual_gaps": []}
-
-    monkeypatch.setattr(endpoints, "MultimodalService", FakeMultimodal)
-    response = TestClient(app).post(
-        "/api/videos/analyze",
-        json={"url": VIDEO_ID, "mode": "deep", "transcript_data": TRANSCRIPT, "frames": [FRAME]},
-    )
-    assert response.status_code == 200, response.text
-    assert response.json()["deep_analysis"]["visual_summary"] == "A diagram appears."
-
-
-def test_deep_analysis_keeps_transcript_result_when_visual_provider_is_limited(monkeypatch):
-    monkeypatch.setattr(endpoints.settings, "GROQ_API_KEY", "test-key")
-    monkeypatch.setattr(endpoints, "LLMService", FakeLLM)
-
-    class LimitedMultimodal:
-        async def analyze_frames(self, frames, transcript):
-            raise groq_client.GroqError(429, "Qwen is rate-limited")
-
-    monkeypatch.setattr(endpoints, "MultimodalService", LimitedMultimodal)
-    response = TestClient(app).post(
-        "/api/videos/analyze",
-        json={"url": VIDEO_ID, "mode": "deep", "transcript_data": TRANSCRIPT, "frames": [FRAME]},
-    )
-    assert response.status_code == 200
-    assert response.json()["executive_summary"] == "Solar power overview"
-    assert "deep_analysis" not in response.json()
-    assert "rate-limited" in response.json()["feature_warnings"][0]
 
 
 def test_health_names_groq(monkeypatch):

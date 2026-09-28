@@ -34,6 +34,7 @@ MANIFEST
 # Frontend
 node_modules/
 extension/dist/
+extension/*.zip
 dist-ssr/
 *.local
 .eslintcache

@@ -74,9 +74,7 @@ class VideoFrame(BaseModel):
 class AnalyzeRequest(BaseModel):
     url: str
     language: str = "en"
-    mode: Literal["quick", "deep"] = "quick"
     transcript_data: Optional[List[Dict[str, Any]]] = None
-    frames: Optional[List[VideoFrame]] = Field(default=None, max_length=3)
 
 class ChatRequest(BaseModel):
     question: str

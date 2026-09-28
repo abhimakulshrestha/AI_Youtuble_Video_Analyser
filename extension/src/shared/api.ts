@@ -39,7 +39,7 @@ export interface VideoAnalysis {
   statistics: any[];
   action_items: any[];
   conclusions: string[];
-  deep_analysis?: { visual_summary: string; visual_events: VisualEvent[]; visual_gaps: VisualGap[] };
+  deep_analysis?: DeepAnalysis;
   evidence_checks?: EvidenceCheck[];
   transcript_data?: TranscriptSegment[];
   feature_warnings?: string[];
@@ -84,44 +84,14 @@ export interface ChatResponse {
 }
 
 export const api = {
-  async analyzeVideo(url: string, transcript_data?: any[], mode: "quick" | "deep" = "quick", frames?: VideoFrame[]): Promise<VideoAnalysis> {
-    const res = await fetch(`${API_BASE}/videos/analyze`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, mode, language: "en", transcript_data, frames })
-    });
-    
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}));
-      throw new Error(error.detail || `HTTP error ${res.status}`);
-    }
-    
-    return await res.json();
+  analyzeVideo(url: string, transcript_data?: TranscriptSegment[]) {
+    return post<VideoAnalysis>('/videos/analyze', { url, language: 'en', transcript_data });
   },
 
-  async askQuestion(videoId: string, question: string, transcriptData?: any[], contextHints?: string, focusTime?: number): Promise<ChatResponse> {
-    const res = await fetch(`${API_BASE}/videos/${videoId}/ask`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, context_hints: contextHints, transcript_data: transcriptData, focus_time: focusTime })
-    });
-    
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}));
-      throw new Error(error.detail || `HTTP error ${res.status}`);
-    }
-    
-    return await res.json();
+  askQuestion(videoId: string, question: string, transcriptData?: TranscriptSegment[], contextHints?: string, focusTime?: number) {
+    return post<ChatResponse>(`/videos/${videoId}/ask`, { question, context_hints: contextHints, transcript_data: transcriptData, focus_time: focusTime });
   },
-  
-  async getTranscript(videoId: string): Promise<any[]> {
-    const res = await fetch(`${API_BASE}/videos/${videoId}/transcript`);
-    if (!res.ok) {
-      throw new Error(`HTTP error ${res.status}`);
-    }
-    const data = await res.json();
-    return data.transcript;
-  },
+
   plan(videoId: string, goal: string, minutes: number, transcript_data: TranscriptSegment[], analysis: VideoAnalysis) {
     return post<WatchPlan>(`/videos/${videoId}/plan`, { goal, minutes, transcript_data, analysis });
   },

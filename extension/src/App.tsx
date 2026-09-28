@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { api, type VideoAnalysis, type TranscriptSegment, type VideoFrame } from './shared/api';
+import { api, type Citation, type VideoAnalysis, type TranscriptSegment, type VideoFrame } from './shared/api';
 import { library, type SavedVideo } from './shared/library';
 import { FeatureViews } from './FeatureViews';
 import { Bookmark, BookmarkCheck } from 'lucide-react';
@@ -28,7 +28,7 @@ function formatTime(seconds: number) {
 export default function App() {
   const [videoContext, setVideoContext] = useState<VideoContext | null>(null);
   const [analysis, setAnalysis] = useState<VideoAnalysis | null>(null);
-  const [transcriptData, setTranscriptData] = useState<any[] | undefined>();
+  const [transcriptData, setTranscriptData] = useState<TranscriptSegment[] | undefined>();
   const [savedVideos, setSavedVideos] = useState<SavedVideo[]>([]);
   const [playerTime, setPlayerTime] = useState(0);
   const [focusTime, setFocusTime] = useState<number | undefined>();
@@ -212,7 +212,7 @@ export default function App() {
         }
         return frames;
       };
-      const result = analysis || await api.analyzeVideo(videoContext.url, transcript_data, 'quick');
+      const result = analysis || await api.analyzeVideo(videoContext.url, transcript_data);
       if (activeVideoId.current !== videoId) return;
       if (!analysis) {
         setTranscriptData(result.transcript_data || transcript_data);
@@ -431,8 +431,8 @@ export default function App() {
   );
 }
 
-function ChatInterface({ videoId, transcriptData, onSeek, focusTime }: { videoId: string, transcriptData?: any[], onSeek: (time: number) => void, focusTime?: number }) {
-  const [messages, setMessages] = useState<Array<{role: string, content: string, citations?: any[]}>>([]);
+function ChatInterface({ videoId, transcriptData, onSeek, focusTime }: { videoId: string, transcriptData?: TranscriptSegment[], onSeek: (time: number) => void, focusTime?: number }) {
+  const [messages, setMessages] = useState<Array<{role: string, content: string, citations?: Citation[]}>>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
 
