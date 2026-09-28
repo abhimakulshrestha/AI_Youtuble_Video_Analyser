@@ -169,6 +169,16 @@ def test_blank_model_list_items_are_discarded():
     assert len(analysis.topics) == 1
 
 
+def test_optional_record_objects_from_groq_are_normalized():
+    analysis = VideoAnalysis.model_validate({
+        "executive_summary": "Summary", "detailed_summary": "Details",
+        "key_points": [], "chapters": [], "topics": [],
+        "statistics": {}, "action_items": {"task": "Review the clip"},
+    })
+    assert analysis.statistics == []
+    assert analysis.action_items == [{"task": "Review the clip"}]
+
+
 def test_long_transcript_is_sampled_across_video():
     captured = {}
 

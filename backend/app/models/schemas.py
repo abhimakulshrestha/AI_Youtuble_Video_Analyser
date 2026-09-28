@@ -1,7 +1,7 @@
 import base64
 import binascii
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from typing import List, Optional, Dict, Any, Literal
 
 class TimestampEvidence(BaseModel):
@@ -42,7 +42,9 @@ class VideoAnalysis(BaseModel):
 
     @field_validator("key_points", "chapters", "topics", "entities", "terminology", "statistics", "action_items", mode="before")
     @classmethod
-    def discard_empty_records(cls, value: Any) -> Any:
+    def discard_empty_records(cls, value: Any, info: ValidationInfo) -> Any:
+        if info.field_name in {"entities", "terminology", "statistics", "action_items"} and isinstance(value, dict):
+            return [value] if value else []
         return [item for item in value if isinstance(item, (dict, BaseModel))] if isinstance(value, list) else value
 
     @field_validator("conclusions", mode="before")
